@@ -1,22 +1,31 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Comment, Discussion, Message, Notification, Project, Stage, Task, TelegramUser
+from .models import Project, Task, TelegramUser
 
 
 @admin.register(TelegramUser)
 class TelegramUserAdmin(UserAdmin):
-    list_display = ('username', 'telegram_id', 'first_name', 'last_name', 'is_active', 'is_staff')
+    list_display = ('username', 'telegram_id', 'first_name', 'last_name', 'is_active', 'is_staff', 'is_premium')
+    list_filter = ('is_active', 'is_staff', 'is_premium')
+    search_fields = ('username', 'first_name', 'last_name', 'telegram_id')
     fieldsets = UserAdmin.fieldsets + (
-        ('Telegram', {'fields': ('telegram_id', 'photo_url', 'last_seen')}),
+        ('Telegram', {'fields': ('telegram_id', 'photo_url', 'last_seen', 'language_code', 'is_premium')}),
     )
     readonly_fields = ('last_seen',)
 
 
-admin.site.register(Project)
-admin.site.register(Stage)
-admin.site.register(Task)
-admin.site.register(Comment)
-admin.site.register(Discussion)
-admin.site.register(Message)
-admin.site.register(Notification)
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ('name', 'owner', 'is_archived', 'created_at')
+    list_filter = ('is_archived', 'created_at')
+    search_fields = ('name', 'description', 'owner__username')
+    filter_horizontal = ('members',)
+
+
+@admin.register(Task)
+class TaskAdmin(admin.ModelAdmin):
+    list_display = ('title', 'project', 'status', 'assignee', 'deadline', 'created_at')
+    list_filter = ('status', 'deadline', 'created_at')
+    search_fields = ('title', 'description', 'project__name', 'assignee__username')
+    readonly_fields = ('created_at', 'updated_at', 'completed_at')

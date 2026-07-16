@@ -1,0 +1,59 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{% block title %}КружокAPP{% endblock %}</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<!-- hx-headers прокидывает CSRF-токен во ВСЕ последующие HTMX-запросы автоматически -->
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="bg-gray-50">
+    {% csrf_token %}
+
+    <div id="auth-status" class="hidden text-sm text-red-600 p-2"></div>
+
+    {% block content %}{% endblock %}
+
+    <script>
+        // Стандартный сниппет Django для чтения csrftoken из cookie
+        function getCookie(name) {
+            const match = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+            return match ? match.pop() : '';
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const tg = window.Telegram?.WebApp;
+            if (!tg) {
+                console.warn('Открыто вне Telegram — авторизация через initData недоступна.');
+                return;
+            }
+            tg.ready();
+            tg.expand();
+
+            fetch('/auth/telegram/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ init_data: tg.initData }),
+            })
+                .then((r) => r.json())
+                .then((data) => {
+                    if (!data.ok) {
+                        document.getElementById('auth-status').textContent =
+                            'Ошибка авторизации: ' + data.error;
+                        document.getElementById('auth-status').classList.remove('hidden');
+                        return;
+                    }
+                    console.log('Авторизован как', data.user.display_name);
+                    // Здесь на Шаге 3 будем догружать реальный контент через HTMX
+                })
+                .catch((err) => console.error('Не удалось связаться с сервером:', err));
+        });
+    </script>
+</body>
+</html>

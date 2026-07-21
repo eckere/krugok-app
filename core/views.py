@@ -7,16 +7,32 @@ import logging
 from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
+from django.db import models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ProjectForm, TaskForm
-from .models import Project, Task, TelegramUser
+from .forms import ProjectForm, StageForm, TaskForm
+from .models import Project, Stage, Task, TelegramUser
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
+
+
+def get_project_or_403(project_id, user):
+    project = get_object_or_404(Project, id=project_id, is_archived=False)
+    if project.owner_id != user.id and not project.members.filter(pk=user.id).exists():
+        raise PermissionDenied
+    return project
+
+
+def get_stage_or_403(stage_id, user):
+    stage = get_object_or_404(Stage, id=stage_id, is_archived=False, project__is_archived=False)
+    if stage.project.owner_id != user.id and not stage.project.members.filter(pk=user.id).exists():
+        raise PermissionDenied
+    return stage
 
 
 @ensure_csrf_cookie
@@ -184,6 +200,13 @@ def project_list(request):
 
 
 @login_required
+def project_detail(request, project_id):
+    project = get_project_or_403(project_id, request.user)
+    stages = project.stages.filter(is_archived=False).order_by('order')
+    return render(request, 'core/projects/detail.html', {'project': project, 'stages': stages})
+
+
+@login_required
 def project_create(request):
     """
     GET  /projects/create/  -> пустая форма (в модалку #project-modal)
@@ -214,7 +237,94 @@ def project_archive(request, project_id):
     группировку молча). Пустое тело ответа -> hx-swap=outerHTML убирает
     карточку из списка активных проектов.
     """
-    project = get_object_or_404(Project, id=project_id)
+    project = get_project_or_403(project_id, request.user)
     project.is_archived = True
     project.save()
+    return HttpResponse(status=200)
+
+
+def _normalize_stage_order(project):
+    stages = list(project.stages.filter(is_archived=False).order_by('order', 'created_at'))
+    for index, stage in enumerate(stages, start=1):
+        if stage.order != index:
+            stage.order = index
+            stage.save(update_fields=['order'])
+
+
+@login_required
+def stage_list(request, project_id):
+    project = get_project_or_403(project_id, request.user)
+    stages = project.stages.filter(is_archived=False).order_by('order')
+    return render(request, 'core/stages/list.html', {'project': project, 'stages': stages})
+
+
+@login_required
+def stage_create(request, project_id):
+    project = get_project_or_403(project_id, request.user)
+    if request.method == 'POST':
+        form = StageForm(request.POST)
+        if form.is_valid():
+            stage = form.save(commit=False)
+            stage.project = project
+            if stage.order is None:
+                max_order = project.stages.filter(is_archived=False).aggregate(models.Max('order'))['order__max']
+                stage.order = (max_order or 0) + 1
+            else:
+                project.stages.filter(is_archived=False, order__gte=stage.order).update(order=models.F('order') + 1)
+            stage.save()
+            _normalize_stage_order(project)
+            return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
+        return render(request, 'core/stages/form.html', {'form': form, 'project': project}, status=422)
+
+    return render(request, 'core/stages/form.html', {'form': StageForm(), 'project': project})
+
+
+@login_required
+def stage_update(request, stage_id):
+    stage = get_stage_or_403(stage_id, request.user)
+    project = stage.project
+    old_order = stage.order
+
+    if request.method == 'POST':
+        form = StageForm(request.POST, instance=stage)
+        if form.is_valid():
+            new_order = form.cleaned_data.get('order')
+            if new_order is None:
+                new_order = old_order
+            if new_order is None:
+                max_order = project.stages.filter(is_archived=False).aggregate(models.Max('order'))['order__max'] or 0
+                new_order = max_order + 1
+            if old_order != new_order:
+                stage.order = None
+                stage.save(update_fields=['order'])
+                if old_order is not None and old_order < new_order:
+                    project.stages.filter(is_archived=False, order__gt=old_order, order__lte=new_order).exclude(pk=stage.pk).update(order=models.F('order') - 1)
+                else:
+                    project.stages.filter(is_archived=False, order__gte=new_order, order__lt=old_order if old_order is not None else new_order).exclude(pk=stage.pk).update(order=models.F('order') + 1)
+                stage.order = new_order
+            stage.save()
+            _normalize_stage_order(project)
+            return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
+        return render(request, 'core/stages/form.html', {'form': form}, status=422)
+
+    return render(request, 'core/stages/form.html', {'form': StageForm(instance=stage)})
+
+
+@login_required
+@require_POST
+def stage_archive(request, stage_id):
+    stage = get_stage_or_403(stage_id, request.user)
+    stage.is_archived = True
+    stage.save()
+    _normalize_stage_order(stage.project)
+    return HttpResponse(status=200)
+
+
+@login_required
+@require_http_methods(['DELETE'])
+def stage_delete(request, stage_id):
+    stage = get_stage_or_403(stage_id, request.user)
+    project = stage.project
+    stage.delete()
+    _normalize_stage_order(project)
     return HttpResponse(status=200)

@@ -15,5 +15,12 @@ urlpatterns = [
 
     path('projects/', views.project_list, name='project_list'),
     path('projects/create/', views.project_create, name='project_create'),
+    path('projects/<int:project_id>/', views.project_detail, name='project_detail'),
     path('projects/<int:project_id>/archive/', views.project_archive, name='project_archive'),
+
+    path('projects/<int:project_id>/stages/', views.stage_list, name='stage_list'),
+    path('projects/<int:project_id>/stages/create/', views.stage_create, name='stage_create'),
+    path('stages/<int:stage_id>/edit/', views.stage_update, name='stage_update'),
+    path('stages/<int:stage_id>/archive/', views.stage_archive, name='stage_archive'),
+    path('stages/<int:stage_id>/delete/', views.stage_delete, name='stage_delete'),
 ]

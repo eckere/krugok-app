@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
@@ -48,6 +49,35 @@ class Project(models.Model):
         return self.name
 
 
+class Stage(models.Model):
+    class Status(models.TextChoices):
+        NOT_STARTED = 'not_started', 'Не начат'
+        IN_PROGRESS = 'in_progress', 'В процессе'
+        DONE = 'done', 'Выполнена'
+
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='stages',
+    )
+    name = models.CharField(max_length=255)
+    order = models.PositiveIntegerField(null=True, blank=True)
+    deadline = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NOT_STARTED)
+    is_archived = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['order', 'created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'order'], name='unique_stage_order_per_project'),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Task(models.Model):
     class Status(models.TextChoices):
         NEW = 'new', 'Новая'
@@ -59,6 +89,13 @@ class Task(models.Model):
 
     project = models.ForeignKey(
         Project,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tasks',
+    )
+    stage = models.ForeignKey(
+        Stage,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -93,7 +130,13 @@ class Task(models.Model):
     def __str__(self):
         return self.title
 
+    def clean(self):
+        super().clean()
+        if self.stage and self.project_id != self.stage.project_id:
+            raise ValidationError({'stage': 'Этап должен принадлежать выбранному проекту.'})
+
     def save(self, *args, **kwargs):
+        self.full_clean()
         if self.status == self.Status.DONE and not self.completed_at:
             self.completed_at = timezone.now()
         elif self.status != self.Status.DONE:

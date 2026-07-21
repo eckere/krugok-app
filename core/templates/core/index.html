@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
+    <div class="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow-lg">
+        {% if user.is_authenticated %}
+            <div class="space-y-4">
+                <h1 class="text-2xl font-semibold text-slate-900">Привет, {{ user.first_name }}!</h1>
+                <p class="text-sm text-slate-600">Тестовый режим активирован.</p>
+                <div class="rounded-2xl bg-slate-100 p-4 text-slate-700">
+                    Это временный режим разработчика для локальной отладки без Telegram.
+                </div>
+            </div>
+        {% else %}
+            <div class="space-y-6 text-center">
+                <h1 class="text-3xl font-semibold text-slate-900">КружокAPP</h1>
+                <p class="text-sm text-slate-500">Временно работаем в обычном браузере.</p>
+                <a href="{% url 'dev_login' %}" class="inline-flex rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">
+                    Войти как Разработчик
+                </a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

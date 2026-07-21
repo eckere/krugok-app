@@ -6,7 +6,7 @@ import logging
 
 from django.contrib.auth import login
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
@@ -16,19 +16,21 @@ from .telegram_auth import InitDataValidationError, validate_init_data
 logger = logging.getLogger(__name__)
 
 
-@ensure_csrf_cookie
 def index(request):
-    """
-    GET /
-    Точка входа Mini App. Telegram открывает именно этот URL внутри своего
-    WebView. Шаблон грузит telegram-web-app.js и на DOMContentLoaded сам
-    шлёт initData на /auth/telegram/ (см. templates/base.html).
-
-    @ensure_csrf_cookie — гарантирует, что кука csrftoken уйдёт клиенту
-    даже до захода на страницы с формами; без неё POST на /auth/telegram/
-    будет 403 (кука появляется лениво только при первом её использовании).
-    """
     return render(request, 'core/index.html')
+
+
+def dev_login(request):
+    user, _created = TelegramUser.objects.get_or_create(
+        telegram_id=111222333,
+        defaults={
+            'username': 'dev_test',
+            'first_name': 'Тестировщик',
+            'last_name': '',
+        },
+    )
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+    return redirect('index')
 
 
 @require_POST

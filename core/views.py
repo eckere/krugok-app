@@ -15,31 +15,13 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from .forms import CommentForm, ProjectForm, StageForm, TaskForm
-from .models import Comment, Project, Stage, Task, TelegramUser
+from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser
+from .permissions import get_project_or_403, get_stage_or_403, get_task_or_403
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
 
 
-def get_project_or_403(project_id, user):
-    project = get_object_or_404(Project, id=project_id, is_archived=False)
-    if project.owner_id != user.id and not project.members.filter(pk=user.id).exists():
-        raise PermissionDenied
-    return project
-
-
-def get_stage_or_403(stage_id, user):
-    stage = get_object_or_404(Stage, id=stage_id, is_archived=False, project__is_archived=False)
-    if stage.project.owner_id != user.id and not stage.project.members.filter(pk=user.id).exists():
-        raise PermissionDenied
-    return stage
-
-
-def get_task_or_403(task_id, user):
-    task = get_object_or_404(Task, id=task_id)
-    if task.project_id is not None:
-        get_project_or_403(task.project_id, user)
-    return task
 
 
 @ensure_csrf_cookie
@@ -256,6 +238,11 @@ def project_create(request):
             project.owner = request.user
             project.save()
             project.members.add(request.user)
+            ProjectMembership.objects.create(
+                project=project,
+                user=request.user,
+                role=ProjectMembership.Role.OWNER,
+            )
             return render(request, 'core/projects/card.html', {'project': project})
         return render(request, 'core/projects/form.html', {'form': form}, status=422)
 

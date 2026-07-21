@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import Project, Task, TelegramUser
+from .models import Project, ProjectMembership, Task, TelegramUser
 
 
 @admin.register(TelegramUser)
@@ -29,3 +29,11 @@ class TaskAdmin(admin.ModelAdmin):
     list_filter = ('status', 'deadline', 'created_at')
     search_fields = ('title', 'description', 'project__name', 'assignee__username')
     readonly_fields = ('created_at', 'updated_at', 'completed_at')
+
+
+@admin.register(ProjectMembership)
+class ProjectMembershipAdmin(admin.ModelAdmin):
+    list_display = ('project', 'user', 'role', 'created_at')
+    list_filter = ('role', 'created_at')
+    search_fields = ('project__name', 'user__username')
+    readonly_fields = ('created_at',)

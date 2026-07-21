@@ -49,6 +49,55 @@ class Project(models.Model):
     def __str__(self):
         return self.name
 
+    def get_members(self):
+        return TelegramUser.objects.filter(
+            models.Q(project_memberships__project=self) | models.Q(projects=self)
+        ).distinct()
+
+    def is_member(self, user):
+        return (
+            self.owner_id == user.id
+            or self.project_memberships.filter(user=user).exists()
+            or self.members.filter(pk=user.pk).exists()
+        )
+
+    def is_admin(self, user):
+        return (
+            self.owner_id == user.id
+            or self.project_memberships.filter(user=user, role=ProjectMembership.Role.ADMIN).exists()
+        )
+
+    def is_owner(self, user):
+        return self.owner_id == user.id or self.project_memberships.filter(user=user, role=ProjectMembership.Role.OWNER).exists()
+
+
+class ProjectMembership(models.Model):
+    class Role(models.TextChoices):
+        OWNER = 'owner', 'Владелец'
+        ADMIN = 'admin', 'Админ'
+        MEMBER = 'member', 'Участник'
+
+    project = models.ForeignKey(
+        'Project',
+        on_delete=models.CASCADE,
+        related_name='project_memberships',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='project_memberships',
+    )
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['project', 'user'], name='unique_project_membership'),
+        ]
+
+    def __str__(self):
+        return f'{self.user} ({self.get_role_display()}) in {self.project}'
+
 
 class Stage(models.Model):
     class Status(models.TextChoices):

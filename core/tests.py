@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Comment, Project, Stage, Task
+from .models import Comment, Project, ProjectMembership, Stage, Task
 
 
 class StageAndProjectTests(TestCase):
@@ -147,6 +147,33 @@ class ProjectCrudTests(TestCase):
         self.assertEqual(response.status_code, 200)
         project.refresh_from_db()
         self.assertTrue(project.is_archived)
+
+
+class ProjectMembershipTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='memberuser', password='pass')
+        self.client.force_login(self.user)
+
+    def test_project_owner_membership_created_on_project_create(self):
+        response = self.client.post(reverse('project_create'), {
+            'name': 'Owner Project',
+            'description': 'Owned project',
+        })
+        self.assertEqual(response.status_code, 200)
+        project = Project.objects.get(name='Owner Project')
+        self.assertTrue(ProjectMembership.objects.filter(
+            project=project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        ).exists())
+        self.assertTrue(project.is_owner(self.user))
+        self.assertTrue(project.is_member(self.user))
+
+    def test_is_member_returns_true_for_existing_members(self):
+        project = Project.objects.create(name='Member Project', description='Desc', owner=self.user)
+        project.members.add(self.user)
+        self.assertTrue(project.is_member(self.user))
+        self.assertIn(self.user, list(project.get_members()))
 
 
 class PermissionTests(TestCase):

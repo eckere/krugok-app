@@ -9,7 +9,40 @@
                     <h1 class="text-2xl font-semibold text-slate-900">Привет, {{ user.first_name }}!</h1>
                     <p class="text-sm text-slate-600">Тестовый режим активирован.</p>
                 </div>
-                {% include 'core/tasks/list.html' %}
+
+                <div class="flex gap-2 border-b border-slate-200 pb-3" id="main-tabs">
+                    <button type="button" data-tab="tasks" onclick="switchTab('tasks')"
+                            class="tab-btn rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">
+                        Задачи
+                    </button>
+                    <button type="button" data-tab="projects" onclick="switchTab('projects')"
+                            class="tab-btn rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700">
+                        Проекты
+                    </button>
+                </div>
+
+                <div id="tab-tasks">
+                    {% include 'core/tasks/list.html' %}
+                </div>
+                <div id="tab-projects" class="hidden">
+                    {% include 'core/projects/list.html' %}
+                </div>
+
+                <script>
+                    function switchTab(tab) {
+                        document.getElementById('tab-tasks').classList.toggle('hidden', tab !== 'tasks');
+                        document.getElementById('tab-projects').classList.toggle('hidden', tab !== 'projects');
+                        document.querySelectorAll('#main-tabs .tab-btn').forEach(function (btn) {
+                            var active = btn.dataset.tab === tab;
+                            btn.classList.toggle('bg-slate-900', active);
+                            btn.classList.toggle('text-white', active);
+                            btn.classList.toggle('border', !active);
+                            btn.classList.toggle('border-slate-300', !active);
+                            btn.classList.toggle('bg-white', !active);
+                            btn.classList.toggle('text-slate-700', !active);
+                        });
+                    }
+                </script>
             </div>
         {% else %}
             <div class="space-y-6 text-center">

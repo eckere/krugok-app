@@ -1,0 +1,26 @@
+{% if not request.htmx %}
+  <div class="space-y-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <h2 class="text-lg font-semibold text-gray-900">Проекты</h2>
+        <p class="text-sm text-gray-500">Папки, в которых будут собираться этапы и задачи</p>
+      </div>
+      <button type="button" hx-get="{% url 'project_create' %}" hx-target="#project-modal" hx-swap="innerHTML" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
+        + Новый проект
+      </button>
+    </div>
+
+    <div id="project-modal"></div>
+{% endif %}
+
+    <div id="project-list" class="space-y-3">
+      {% for project in projects %}
+        {% include 'core/projects/card.html' %}
+      {% empty %}
+        <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">Проектов пока нет.</div>
+      {% endfor %}
+    </div>
+
+{% if not request.htmx %}
+  </div>
+{% endif %}

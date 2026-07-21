@@ -7,13 +7,13 @@ import logging
 from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import TaskForm
-from .models import Task, TelegramUser
+from .forms import ProjectForm, TaskForm
+from .models import Project, Task, TelegramUser
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ def index(request):
     if request.user.is_authenticated:
         context['tasks'] = Task.objects.select_related('project', 'assignee').order_by('status', 'deadline')
         context['filter'] = 'all'
+        context['projects'] = Project.objects.filter(is_archived=False).order_by('-created_at')
     return render(request, 'core/index.html', context)
 
 
@@ -141,10 +142,16 @@ def task_update(request, task_id):
 @login_required
 @require_http_methods(['DELETE'])
 def task_delete(request, task_id):
-    """DELETE /tasks/<id>/delete/ -> пустой ответ; hx-swap=outerHTML стирает карточку."""
+    """
+    DELETE /tasks/<id>/delete/ -> пустое тело ответа.
+    Важно: именно HttpResponse(status=200) с пустым телом, а не
+    JsonResponse({}) — при hx-swap="outerHTML" HTMX подставляет ТЕЛО
+    ответа буквально на место карточки; JsonResponse({}) оставил бы
+    в DOM текст "{}" вместо того, чтобы карточка просто исчезла.
+    """
     task = get_object_or_404(Task, id=task_id)
     task.delete()
-    return JsonResponse({}, status=200)
+    return HttpResponse(status=200)
 
 
 @login_required
@@ -161,3 +168,53 @@ def task_status(request, task_id):
     task.status = order[(order.index(task.status) + 1) % len(order)]
     task.save()
     return render(request, 'core/tasks/card.html', {'task': task})
+
+
+# ---------------------------------------------------------------------------
+# Проекты (ТЗ 3.4: "Создавать проекты (папки)"). Пока без этапов —
+# Stage вернём отдельным шагом, когда дойдём именно до него.
+# ---------------------------------------------------------------------------
+
+
+@login_required
+def project_list(request):
+    """GET /projects/ — список активных (не архивных) проектов."""
+    projects = Project.objects.filter(is_archived=False).order_by('-created_at')
+    return render(request, 'core/projects/list.html', {'projects': projects})
+
+
+@login_required
+def project_create(request):
+    """
+    GET  /projects/create/  -> пустая форма (в модалку #project-modal)
+    POST /projects/create/  -> валидация; успех -> создатель автоматически
+                                становится owner и первым участником (members);
+                                отдаём одну новую карточку (append в #project-list)
+    """
+    if request.method == 'POST':
+        form = ProjectForm(request.POST)
+        if form.is_valid():
+            project = form.save(commit=False)
+            project.owner = request.user
+            project.save()
+            project.members.add(request.user)
+            return render(request, 'core/projects/card.html', {'project': project})
+        return render(request, 'core/projects/form.html', {'form': form}, status=422)
+
+    return render(request, 'core/projects/form.html', {'form': ProjectForm()})
+
+
+@login_required
+@require_POST
+def project_archive(request, project_id):
+    """
+    POST /projects/<id>/archive/
+    Мягкое удаление: is_archived=True, запись остаётся в БД (у неё могут
+    быть задачи — Task.project стоит на SET_NULL, но лучше не терять
+    группировку молча). Пустое тело ответа -> hx-swap=outerHTML убирает
+    карточку из списка активных проектов.
+    """
+    project = get_object_or_404(Project, id=project_id)
+    project.is_archived = True
+    project.save()
+    return HttpResponse(status=200)

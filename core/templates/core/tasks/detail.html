@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
+  <div class="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow-lg">
+    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold text-slate-900">{{ task.title }}</h1>
+        {% if task.project %}
+          <p class="text-sm text-slate-500">Проект: {{ task.project.name }}</p>
+        {% endif %}
+      </div>
+      <a href="{% url 'index' %}" class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Назад</a>
+    </div>
+
+    <div class="space-y-4">
+      <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
+        <div class="space-y-3 text-sm text-slate-700">
+          {% if task.description %}
+            <p>{{ task.description }}</p>
+          {% endif %}
+          <p>Статус: {{ task.get_status_display }}</p>
+          {% if task.stage %}<p>Этап: {{ task.stage.name }}</p>{% endif %}
+          {% if task.assignee %}<p>Исполнитель: {{ task.assignee.get_full_name|default:task.assignee.username }}</p>{% endif %}
+          {% if task.deadline %}<p>Дедлайн: {{ task.deadline|date:'d.m.Y H:i' }}</p>{% endif %}
+          <p>Просрочена: {% if task.is_overdue %}да{% else %}нет{% endif %}</p>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-gray-200 bg-white p-4">
+        <h2 class="text-lg font-semibold text-gray-900">Комментарии</h2>
+        <div id="comment-list" class="space-y-3 mt-4">
+          {% for comment in comments %}
+            {% include 'core/tasks/comment.html' %}
+          {% empty %}
+            <div class="rounded-lg border border-dashed border-gray-300 bg-slate-50 p-4 text-sm text-gray-500">Комментариев пока нет.</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-gray-200 bg-white p-4">
+        <h2 class="text-lg font-semibold text-gray-900">Добавить комментарий</h2>
+        <form method="post" action="{% url 'comment_create' task.id %}" class="mt-4 space-y-3">
+          {% csrf_token %}
+          <div>
+            <label class="mb-1 block text-sm font-medium text-gray-700">Комментарий</label>
+            {{ comment_form.text }}
+            {% if comment_form.text.errors %}
+              <div class="mt-1 text-sm text-red-600">{{ comment_form.text.errors|join:', ' }}</div>
+            {% endif %}
+          </div>
+          <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">Отправить</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

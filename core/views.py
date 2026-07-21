@@ -14,8 +14,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import ProjectForm, StageForm, TaskForm
-from .models import Project, Stage, Task, TelegramUser
+from .forms import CommentForm, ProjectForm, StageForm, TaskForm
+from .models import Comment, Project, Stage, Task, TelegramUser
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,13 @@ def get_stage_or_403(stage_id, user):
     if stage.project.owner_id != user.id and not stage.project.members.filter(pk=user.id).exists():
         raise PermissionDenied
     return stage
+
+
+def get_task_or_403(task_id, user):
+    task = get_object_or_404(Task, id=task_id)
+    if task.project_id is not None:
+        get_project_or_403(task.project_id, user)
+    return task
 
 
 @ensure_csrf_cookie
@@ -116,6 +123,16 @@ def task_list(request):
 
 
 @login_required
+def task_detail(request, task_id):
+    task = get_task_or_403(task_id, request.user)
+    return render(request, 'core/tasks/detail.html', {
+        'task': task,
+        'comments': task.comments.all(),
+        'comment_form': CommentForm(),
+    })
+
+
+@login_required
 def task_create(request):
     """
     GET  /tasks/create/  -> пустая форма (для модалки, hx-target=#task-modal)
@@ -143,7 +160,7 @@ def task_update(request, task_id):
                                 ЭТОЙ ЖЕ задачи (outerHTML-замена по id, а не
                                 append в конец списка — иначе получим дубль)
     """
-    task = get_object_or_404(Task, id=task_id)
+    task = get_task_or_403(task_id, request.user)
 
     if request.method == 'POST':
         form = TaskForm(request.POST, instance=task)
@@ -165,7 +182,7 @@ def task_delete(request, task_id):
     ответа буквально на место карточки; JsonResponse({}) оставил бы
     в DOM текст "{}" вместо того, чтобы карточка просто исчезла.
     """
-    task = get_object_or_404(Task, id=task_id)
+    task = get_task_or_403(task_id, request.user)
     task.delete()
     return HttpResponse(status=200)
 
@@ -179,12 +196,30 @@ def task_status(request, task_id):
     поэтому статус просто циклически переключается: новая -> в процессе ->
     выполнена -> снова новая. Возвращает обновлённую карточку для outerHTML.
     """
-    task = get_object_or_404(Task, id=task_id)
+    task = get_task_or_403(task_id, request.user)
     order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
     task.status = order[(order.index(task.status) + 1) % len(order)]
     task.save()
     return render(request, 'core/tasks/card.html', {'task': task})
 
+
+@login_required
+@require_POST
+def comment_create(request, task_id):
+    task = get_task_or_403(task_id, request.user)
+    form = CommentForm(request.POST)
+    if form.is_valid():
+        comment = form.save(commit=False)
+        comment.task = task
+        comment.author = request.user
+        comment.save()
+        return redirect('task_detail', task_id=task.id)
+
+    return render(request, 'core/tasks/detail.html', {
+        'task': task,
+        'comments': task.comments.all(),
+        'comment_form': form,
+    }, status=422)
 
 # ---------------------------------------------------------------------------
 # Проекты (ТЗ 3.4: "Создавать проекты (папки)"). Пока без этапов —
@@ -249,13 +284,6 @@ def _normalize_stage_order(project):
         if stage.order != index:
             stage.order = index
             stage.save(update_fields=['order'])
-
-
-@login_required
-def stage_list(request, project_id):
-    project = get_project_or_403(project_id, request.user)
-    stages = project.stages.filter(is_archived=False).order_by('order')
-    return render(request, 'core/stages/list.html', {'project': project, 'stages': stages})
 
 
 @login_required

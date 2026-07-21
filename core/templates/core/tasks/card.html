@@ -2,7 +2,7 @@
   <div class="flex items-start justify-between gap-3">
     <div>
       <div class="flex items-center gap-2">
-        <h3 class="font-semibold text-gray-900">{{ task.title }}</h3>
+        <h3 class="font-semibold text-gray-900"><a href="{% url 'task_detail' task.id %}" class="hover:underline">{{ task.title }}</a></h3>
         <span class="rounded-full px-2 py-1 text-xs font-medium {% if task.status == 'done' %}bg-emerald-100 text-emerald-700{% elif task.status == 'in_progress' %}bg-amber-100 text-amber-700{% else %}bg-slate-100 text-slate-700{% endif %}">
           {{ task.get_status_display }}
         </span>

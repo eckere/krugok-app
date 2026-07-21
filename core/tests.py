@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Project, Stage, Task
+from .models import Comment, Project, Stage, Task
 
 
 class StageAndProjectTests(TestCase):
@@ -61,3 +61,165 @@ class StageAndProjectTests(TestCase):
         task = Task(title='Задача', project=self.project, stage=other_stage, creator=self.user)
         with self.assertRaises(ValidationError):
             task.full_clean()
+
+
+class TaskCrudTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='tasker', password='pass')
+        self.client.force_login(self.user)
+        self.project = Project.objects.create(name='Project Task', description='Test project', owner=self.user)
+        self.project.members.add(self.user)
+
+    def test_create_task(self):
+        response = self.client.post(reverse('task_create'), {
+            'title': 'Task 1',
+            'description': 'Desc',
+            'project': self.project.id,
+            'stage': '',
+            'assignee': '',
+            'deadline': '',
+            'status': 'new',
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Task 1')
+        self.assertTrue(Task.objects.filter(title='Task 1', project=self.project).exists())
+
+    def test_update_task(self):
+        task = Task.objects.create(title='Task 2', description='Desc', project=self.project, creator=self.user)
+        response = self.client.post(reverse('task_update', args=[task.id]), {
+            'title': 'Task 2 updated',
+            'description': 'Desc',
+            'project': self.project.id,
+            'stage': '',
+            'assignee': '',
+            'deadline': '',
+            'status': 'in_progress',
+        })
+        self.assertEqual(response.status_code, 200)
+        task.refresh_from_db()
+        self.assertEqual(task.title, 'Task 2 updated')
+        self.assertEqual(task.status, 'in_progress')
+
+    def test_delete_task_returns_empty_body(self):
+        task = Task.objects.create(title='Task 3', description='Desc', project=self.project, creator=self.user)
+        response = self.client.delete(reverse('task_delete', args=[task.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'')
+        self.assertFalse(Task.objects.filter(pk=task.pk).exists())
+
+    def test_status_task_returns_updated_card(self):
+        task = Task.objects.create(title='Task 4', description='Desc', project=self.project, creator=self.user)
+        response = self.client.post(reverse('task_status', args=[task.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'В процессе')
+        task.refresh_from_db()
+        self.assertEqual(task.status, 'in_progress')
+
+
+class ProjectCrudTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='owner', password='pass')
+        self.client.force_login(self.user)
+
+    def test_create_project_sets_owner_and_member(self):
+        response = self.client.post(reverse('project_create'), {
+            'name': 'Project X',
+            'description': 'Some desc',
+        })
+        self.assertEqual(response.status_code, 200)
+        project = Project.objects.get(name='Project X')
+        self.assertEqual(project.owner, self.user)
+        self.assertTrue(project.members.filter(pk=self.user.pk).exists())
+
+    def test_project_list_excludes_archived(self):
+        Project.objects.create(name='Archived', description='X', owner=self.user, is_archived=True)
+        active = Project.objects.create(name='Active', description='Y', owner=self.user)
+        active.members.add(self.user)
+        response = self.client.get(reverse('project_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Active')
+        self.assertNotContains(response, 'Archived')
+
+    def test_archive_project_keeps_row(self):
+        project = Project.objects.create(name='Project Z', description='Desc', owner=self.user)
+        project.members.add(self.user)
+        response = self.client.post(reverse('project_archive', args=[project.id]))
+        self.assertEqual(response.status_code, 200)
+        project.refresh_from_db()
+        self.assertTrue(project.is_archived)
+
+
+class PermissionTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='owner', password='pass')
+        self.other = get_user_model().objects.create_user(username='other', password='pass')
+        self.client.force_login(self.other)
+        self.project = Project.objects.create(name='Protected', description='X', owner=self.user)
+        self.project.members.add(self.user)
+        self.task = Task.objects.create(title='Private', description='Desc', project=self.project, creator=self.user)
+
+    def test_project_detail_forbidden_for_non_member(self):
+        response = self.client.get(reverse('project_detail', args=[self.project.id]))
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_stage_create_forbidden_for_non_member(self):
+        response = self.client.post(reverse('stage_create', args=[self.project.id]), {
+            'name': 'No', 'order': '1', 'status': 'not_started'
+        })
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_task_update_forbidden_for_non_member(self):
+        response = self.client.post(reverse('task_update', args=[self.task.id]), {
+            'title': 'Hack', 'description': 'x', 'project': self.project.id, 'stage': '', 'assignee': '', 'deadline': '', 'status': 'new'
+        })
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_task_delete_forbidden_for_non_member(self):
+        response = self.client.delete(reverse('task_delete', args=[self.task.id]))
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_task_status_forbidden_for_non_member(self):
+        response = self.client.post(reverse('task_status', args=[self.task.id]))
+        self.assertIn(response.status_code, (403, 404))
+
+
+class TaskDetailAndCommentsTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(username='commenter', password='pass')
+        self.client.force_login(self.user)
+        self.project = Project.objects.create(name='Project C', description='X', owner=self.user)
+        self.project.members.add(self.user)
+        self.task = Task.objects.create(title='Task C', description='Desc', project=self.project, creator=self.user)
+
+    def test_task_detail_contains_title_and_description(self):
+        response = self.client.get(reverse('task_detail', args=[self.task.id]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.task.title)
+        self.assertContains(response, self.task.description)
+
+    def test_task_detail_denies_non_member(self):
+        other = get_user_model().objects.create_user(username='other2', password='pass')
+        self.client.force_login(other)
+        response = self.client.get(reverse('task_detail', args=[self.task.id]))
+        self.assertIn(response.status_code, (403, 404))
+
+    def test_comment_create_adds_comment(self):
+        response = self.client.post(reverse('comment_create', args=[self.task.id]), {'text': 'Hello'})
+        self.assertEqual(response.status_code, 302)
+        comment = Comment.objects.get(task=self.task)
+        self.assertEqual(comment.author, self.user)
+        self.assertEqual(comment.text, 'Hello')
+
+    def test_comment_create_empty_text_returns_error(self):
+        response = self.client.post(reverse('comment_create', args=[self.task.id]), {'text': ''})
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Comment.objects.filter(task=self.task).exists())
+        self.assertContains(response, 'Комментарий', status_code=422)
+
+    def test_comments_are_ordered_by_created_at(self):
+        first = Comment.objects.create(task=self.task, author=self.user, text='Первый')
+        second = Comment.objects.create(task=self.task, author=self.user, text='Второй')
+        response = self.client.get(reverse('task_detail', args=[self.task.id]))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode('utf-8')
+        self.assertTrue(content.index('Первый') < content.index('Второй'))

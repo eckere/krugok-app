@@ -4,7 +4,13 @@
     <button type="button" onclick="document.getElementById('task-modal').innerHTML=''" class="text-sm text-gray-500">Закрыть</button>
   </div>
 
-  <form method="post" hx-post="{% if form.instance.pk %}{% url 'task_update' form.instance.pk %}{% else %}{% url 'task_create' %}{% endif %}" hx-target="#task-list" hx-swap="beforeend">
+  <form method="post"
+        hx-post="{% if form.instance.pk %}{% url 'task_update' form.instance.pk %}{% else %}{% url 'task_create' %}{% endif %}"
+        {% if form.instance.pk %}
+        hx-target="#task-{{ form.instance.pk }}" hx-swap="outerHTML"
+        {% else %}
+        hx-target="#task-list" hx-swap="beforeend"
+        {% endif %}>
     {% csrf_token %}
     <div class="space-y-3">
       {% for field in form %}

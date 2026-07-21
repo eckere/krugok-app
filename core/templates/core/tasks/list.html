@@ -1,6 +1,4 @@
-{% if request.htmx %}
-  {% include 'core/tasks/card.html' %}
-{% else %}
+{% if not request.htmx %}
   <div class="space-y-4">
     <div class="flex items-center justify-between">
       <div>
@@ -12,6 +10,8 @@
       </button>
     </div>
 
+    <div id="task-modal"></div>
+
     <div class="flex gap-2">
       <a href="{% url 'task_list' %}?filter=all" hx-get="{% url 'task_list' %}?filter=all" hx-target="#task-list" hx-swap="outerHTML" class="rounded-full border px-3 py-1 text-sm {% if filter == 'all' %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}">
         Все
@@ -20,6 +20,7 @@
         Мои
       </a>
     </div>
+{% endif %}
 
     <div id="task-list" class="space-y-3">
       {% for task in tasks %}
@@ -28,5 +29,7 @@
         <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">Задач пока нет.</div>
       {% endfor %}
     </div>
+
+{% if not request.htmx %}
   </div>
 {% endif %}

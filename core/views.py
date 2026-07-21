@@ -4,30 +4,37 @@ core/views.py
 import json
 import logging
 
+from django.conf import settings
 from django.contrib.auth import login
-from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.contrib.auth.decorators import login_required
+from django.http import Http404, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_http_methods, require_POST
 
-from .models import TelegramUser
+from .forms import TaskForm
+from .models import Task, TelegramUser
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
 
 
+@ensure_csrf_cookie
 def index(request):
-    return render(request, 'core/index.html')
+    context = {}
+    if request.user.is_authenticated:
+        context['tasks'] = Task.objects.select_related('project', 'assignee').order_by('status', 'deadline')
+        context['filter'] = 'all'
+    return render(request, 'core/index.html', context)
 
 
 def dev_login(request):
+    """Временный вход в обход Telegram — ТОЛЬКО для локальной разработки."""
+    if not settings.DEBUG:
+        raise Http404
     user, _created = TelegramUser.objects.get_or_create(
         telegram_id=111222333,
-        defaults={
-            'username': 'dev_test',
-            'first_name': 'Тестировщик',
-            'last_name': '',
-        },
+        defaults={'username': 'dev_test', 'first_name': 'Тестировщик', 'last_name': ''},
     )
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
     return redirect('index')
@@ -38,14 +45,6 @@ def auth_telegram(request):
     """
     POST /auth/telegram/
     Тело запроса (JSON): {"init_data": "<window.Telegram.WebApp.initData>"}
-
-    Валидирует initData -> находит/создаёт TelegramUser -> логинит его
-    через обычный django.contrib.auth сессионный механизм. Дальше все
-    HTMX-запросы едут по стандартной cookie-сессии, отдельный токен не нужен.
-
-    CSRF здесь НЕ отключаем: страница со скриптом Telegram WebApp SDK уже
-    отдана нашим сервером (см. base.html), поэтому кука csrftoken к моменту
-    этого fetch() уже есть у клиента.
     """
     try:
         payload = json.loads(request.body)
@@ -72,10 +71,93 @@ def auth_telegram(request):
             'photo_url': tg_user.get('photo_url'),
         },
     )
-
     login(request, user)
+    return JsonResponse({'ok': True, 'user': {'id': user.id, 'display_name': user.display_name}})
 
-    return JsonResponse({
-        'ok': True,
-        'user': {'id': user.id, 'display_name': user.display_name},
-    })
+
+# ---------------------------------------------------------------------------
+# Задачи. Шаблоны core/templates/core/tasks/{list,form,card}.html и
+# core/forms.py:TaskForm уже существовали — здесь только недостающие view.
+# ---------------------------------------------------------------------------
+
+
+@login_required
+def task_list(request):
+    """
+    GET /tasks/?filter=all|mine
+    Обычный запрос -> полная страница списка (core/tasks/list.html целиком).
+    HTMX-запрос (клик по фильтру, hx-target=#task-list, hx-swap=outerHTML) ->
+    та же разметка, но она сама содержит <div id="task-list">, так что
+    outerHTML-подмена находит новый #task-list в ответе и всё продолжает работать.
+    """
+    filter_value = request.GET.get('filter', 'all')
+    tasks = Task.objects.select_related('project', 'assignee').order_by('status', 'deadline')
+    if filter_value == 'mine':
+        tasks = tasks.filter(assignee=request.user)
+
+    return render(request, 'core/tasks/list.html', {'tasks': tasks, 'filter': filter_value})
+
+
+@login_required
+def task_create(request):
+    """
+    GET  /tasks/create/  -> пустая форма (для модалки, hx-target=#task-modal)
+    POST /tasks/create/  -> валидация; успех -> одна новая карточка (append
+                            в конец #task-list, как и задаёт form.html);
+                            ошибка -> форма с ошибками (перерисовывается в модалке)
+    """
+    if request.method == 'POST':
+        form = TaskForm(request.POST)
+        if form.is_valid():
+            task = form.save(commit=False)
+            task.creator = request.user
+            task.save()
+            return render(request, 'core/tasks/card.html', {'task': task})
+        return render(request, 'core/tasks/form.html', {'form': form}, status=422)
+
+    return render(request, 'core/tasks/form.html', {'form': TaskForm()})
+
+
+@login_required
+def task_update(request, task_id):
+    """
+    GET  /tasks/<id>/edit/  -> форма, предзаполненная текущей задачей
+    POST /tasks/<id>/edit/  -> валидация; успех -> обновлённая карточка
+                                ЭТОЙ ЖЕ задачи (outerHTML-замена по id, а не
+                                append в конец списка — иначе получим дубль)
+    """
+    task = get_object_or_404(Task, id=task_id)
+
+    if request.method == 'POST':
+        form = TaskForm(request.POST, instance=task)
+        if form.is_valid():
+            form.save()
+            return render(request, 'core/tasks/card.html', {'task': task})
+        return render(request, 'core/tasks/form.html', {'form': form}, status=422)
+
+    return render(request, 'core/tasks/form.html', {'form': TaskForm(instance=task)})
+
+
+@login_required
+@require_http_methods(['DELETE'])
+def task_delete(request, task_id):
+    """DELETE /tasks/<id>/delete/ -> пустой ответ; hx-swap=outerHTML стирает карточку."""
+    task = get_object_or_404(Task, id=task_id)
+    task.delete()
+    return JsonResponse({}, status=200)
+
+
+@login_required
+@require_POST
+def task_status(request, task_id):
+    """
+    POST /tasks/<id>/status/
+    Кнопка "Статус" в card.html не передаёт конкретное значение (нет hx-vals),
+    поэтому статус просто циклически переключается: новая -> в процессе ->
+    выполнена -> снова новая. Возвращает обновлённую карточку для outerHTML.
+    """
+    task = get_object_or_404(Task, id=task_id)
+    order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
+    task.status = order[(order.index(task.status) + 1) % len(order)]
+    task.save()
+    return render(request, 'core/tasks/card.html', {'task': task})

@@ -14,9 +14,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import CommentForm, ProjectForm, StageForm, TaskForm
-from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser
-from .permissions import get_project_or_403, get_stage_or_403, get_task_or_403
+from .forms import CommentForm, ProjectForm, StageForm, TaskForm, DiscussionForm, MessageForm
+from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser, Discussion, Message
+from .permissions import get_project_or_403, get_stage_or_403, get_task_or_403, get_discussion_or_403
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
@@ -343,3 +343,66 @@ def stage_delete(request, stage_id):
     stage.delete()
     _normalize_stage_order(project)
     return HttpResponse(status=200)
+
+
+# ---------------------------------------------------------------------------
+# Обсуждения (ТЗ 3.3)
+# ---------------------------------------------------------------------------
+
+
+@login_required
+def discussion_list(request):
+    discussions = Discussion.objects.filter(
+        models.Q(created_by=request.user) | models.Q(participants=request.user)
+    ).distinct().prefetch_related('messages').order_by('-created_at')
+    return render(request, 'core/discussions/list.html', {'discussions': discussions})
+
+
+@login_required
+def discussion_create(request):
+    if request.method == 'POST':
+        form = DiscussionForm(request.POST, user=request.user)
+        if form.is_valid():
+            discussion = form.save(commit=False)
+            discussion.created_by = request.user
+            discussion.save()
+            # form.save_m2m() is needed to save the participants from the form
+            form.save_m2m()
+            # Add the creator to the participants
+            discussion.participants.add(request.user)
+            return redirect('discussion_detail', discussion_id=discussion.id)
+        return render(request, 'core/discussions/form.html', {'form': form}, status=422)
+
+    form = DiscussionForm(user=request.user)
+    return render(request, 'core/discussions/form.html', {'form': form})
+
+
+@login_required
+def discussion_detail(request, discussion_id):
+    discussion = get_discussion_or_403(discussion_id, request.user)
+    messages = discussion.messages.select_related('sender').all()
+    form = MessageForm()
+    return render(request, 'core/discussions/detail.html', {
+        'discussion': discussion,
+        'messages': messages,
+        'form': form,
+    })
+
+
+@login_required
+@require_POST
+def message_create(request, discussion_id):
+    discussion = get_discussion_or_403(discussion_id, request.user)
+    form = MessageForm(request.POST)
+    if form.is_valid():
+        message = form.save(commit=False)
+        message.discussion = discussion
+        message.sender = request.user
+        message.save()
+        return render(request, 'core/discussions/message.html', {'message': message})
+
+    # In case of an error, we can't just render the form, because the detail view needs more context
+    # A full page reload or a more complex HTMX error handling would be better.
+    # For now, let's redirect, though it's not ideal for HTMX.
+    # A better solution for real-world scenarios might be to return a 422 with an error message in the header.
+    return redirect('discussion_detail', discussion_id=discussion_id)

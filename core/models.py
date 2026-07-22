@@ -220,3 +220,51 @@ class Comment(models.Model):
 
     def __str__(self):
         return f'Comment by {self.author} on {self.task}'
+
+
+class Discussion(models.Model):
+    title = models.CharField(max_length=255)
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='discussions',
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='created_discussions',
+    )
+    participants = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        related_name='discussions',
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
+class Message(models.Model):
+    discussion = models.ForeignKey(
+        Discussion,
+        on_delete=models.CASCADE,
+        related_name='messages',
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+    )
+    text = models.TextField(validators=[MinLengthValidator(1)])
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'Message by {self.sender} in {self.discussion}'

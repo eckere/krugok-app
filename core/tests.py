@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Comment, Project, ProjectMembership, Stage, Task
+from .models import Comment, Project, ProjectMembership, Stage, Task, Discussion, Message
 
 
 class StageAndProjectTests(TestCase):
@@ -250,3 +250,91 @@ class TaskDetailAndCommentsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode('utf-8')
         self.assertTrue(content.index('Первый') < content.index('Второй'))
+
+
+class DiscussionAndMessageTests(TestCase):
+    def setUp(self):
+        self.user1 = get_user_model().objects.create_user(username='user1', first_name='Alice')
+        self.user2 = get_user_model().objects.create_user(username='user2', first_name='Bob')
+        self.user3 = get_user_model().objects.create_user(username='user3', first_name='Charlie')
+        self.task = Task.objects.create(title='Test Task', creator=self.user1)
+
+        self.client.force_login(self.user1)
+
+    def test_discussion_create_with_participants(self):
+        response = self.client.post(reverse('discussion_create'), {
+            'title': 'Test Discussion',
+            'task': self.task.id,
+            'participants': [self.user2.id, self.user3.id]
+        })
+        self.assertEqual(response.status_code, 302) # Redirects to detail view
+        discussion = Discussion.objects.get(title='Test Discussion')
+        self.assertEqual(discussion.created_by, self.user1)
+        self.assertIn(self.user1, discussion.participants.all())
+        self.assertIn(self.user2, discussion.participants.all())
+        self.assertIn(self.user3, discussion.participants.all())
+        self.assertEqual(discussion.task, self.task)
+
+    def test_discussion_create_without_task(self):
+        response = self.client.post(reverse('discussion_create'), {
+            'title': 'General Discussion',
+            'participants': [self.user2.id]
+        })
+        self.assertEqual(response.status_code, 302)
+        discussion = Discussion.objects.get(title='General Discussion')
+        self.assertIsNone(discussion.task)
+        self.assertIn(self.user1, discussion.participants.all())
+        self.assertIn(self.user2, discussion.participants.all())
+
+    def test_discussion_list_shows_only_user_discussions(self):
+        # Discussion where user1 is creator
+        Discussion.objects.create(title='My Discussion', created_by=self.user1)
+        # Discussion where user1 is a participant
+        d2 = Discussion.objects.create(title='Their Discussion', created_by=self.user2)
+        d2.participants.add(self.user1)
+        # Discussion where user1 is not involved
+        Discussion.objects.create(title='Secret Discussion', created_by=self.user2)
+
+        response = self.client.get(reverse('discussion_list'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'My Discussion')
+        self.assertContains(response, 'Their Discussion')
+        self.assertNotContains(response, 'Secret Discussion')
+
+    def test_message_create_adds_message(self):
+        discussion = Discussion.objects.create(title='Chat', created_by=self.user1)
+        discussion.participants.add(self.user1)
+
+        response = self.client.post(
+            reverse('message_create', args=[discussion.id]),
+            {'text': 'Hello there!'},
+            HTTP_HX_REQUEST='true' # Simulate HTMX request
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Hello there!')
+        message = Message.objects.get(discussion=discussion)
+        self.assertEqual(message.text, 'Hello there!')
+        self.assertEqual(message.sender, self.user1)
+
+    def test_message_create_with_empty_text_fails(self):
+        discussion = Discussion.objects.create(title='Chat Empty', created_by=self.user1)
+        discussion.participants.add(self.user1)
+
+        response = self.client.post(reverse('message_create', args=[discussion.id]), {'text': ''})
+        # As per the view logic, it redirects on failure for non-htmx, let's stick to that
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(Message.objects.filter(discussion=discussion).exists())
+
+    def test_non_participant_gets_403_on_detail(self):
+        discussion = Discussion.objects.create(title='Private Chat', created_by=self.user2)
+        # user1 is not a participant
+        self.client.force_login(self.user1)
+        response = self.client.get(reverse('discussion_detail', args=[discussion.id]))
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_participant_gets_403_on_message_create(self):
+        discussion = Discussion.objects.create(title='Private Chat 2', created_by=self.user2)
+        # user1 is not a participant
+        self.client.force_login(self.user1)
+        response = self.client.post(reverse('message_create', args=[discussion.id]), {'text': 'Intrusion!'})
+        self.assertEqual(response.status_code, 403)

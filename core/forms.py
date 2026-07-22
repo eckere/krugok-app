@@ -1,6 +1,41 @@
 from django import forms
 
-from .models import Comment, Project, Stage, Task
+from .models import Comment, Project, Stage, Task, Discussion, Message, TelegramUser
+
+
+class DiscussionForm(forms.ModelForm):
+    participants = forms.ModelMultipleChoiceField(
+        queryset=TelegramUser.objects.all(),
+        widget=forms.CheckboxSelectMultiple,
+        required=True,
+        label='Участники',
+    )
+
+    class Meta:
+        model = Discussion
+        fields = ['title', 'task', 'participants']
+        widgets = {
+            'title': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+            'task': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if user:
+            self.fields['participants'].queryset = TelegramUser.objects.exclude(pk=user.pk)
+
+
+class MessageForm(forms.ModelForm):
+    class Meta:
+        model = Message
+        fields = ['text']
+        widgets = {
+            'text': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 2, 'placeholder': 'Написать сообщение...'}),
+        }
+        labels = {
+            'text': '',
+        }
 
 
 class TaskForm(forms.ModelForm):

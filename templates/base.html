@@ -13,6 +13,21 @@
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' class="bg-gray-50">
     {% csrf_token %}
 
+    {% if user.is_authenticated %}
+    <nav class="bg-white shadow-md">
+        <div class="container mx-auto px-4">
+            <div class="flex justify-between items-center py-3">
+                <a href="{% url 'index' %}" class="text-xl font-bold text-gray-800">КружокAPP</a>
+                <div class="flex space-x-4">
+                    <a href="{% url 'task_list' %}" class="text-gray-600 hover:text-gray-900">Задачи</a>
+                    <a href="{% url 'project_list' %}" class="text-gray-600 hover:text-gray-900">Проекты</a>
+                    <a href="{% url 'discussion_list' %}" class="text-gray-600 hover:text-gray-900">Обсуждения</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
+
     <div id="auth-status" class="hidden text-sm text-red-600 p-2"></div>
 
     {% block content %}{% endblock %}

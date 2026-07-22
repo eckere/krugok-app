@@ -25,4 +25,9 @@ urlpatterns = [
 
     path('tasks/<int:task_id>/', views.task_detail, name='task_detail'),
     path('tasks/<int:task_id>/comments/create/', views.comment_create, name='comment_create'),
+
+    path('discussions/', views.discussion_list, name='discussion_list'),
+    path('discussions/create/', views.discussion_create, name='discussion_create'),
+    path('discussions/<int:discussion_id>/', views.discussion_detail, name='discussion_detail'),
+    path('discussions/<int:discussion_id>/messages/create/', views.message_create, name='message_create'),
 ]

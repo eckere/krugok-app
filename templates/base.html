@@ -5,10 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{% block title %}КружокAPP{% endblock %}</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://unpkg.com/htmx.org@2.0.3"></script>
     <link rel="stylesheet" href="{% static 'core/app.css' %}">
 </head>
@@ -97,11 +97,75 @@
         </main>
     {% endif %}
     {% endwith %}
+    {% if not user.is_authenticated %}
+        {% include 'core/loading.html' %}
+    {% endif %}
     <script>
         document.body.addEventListener('closeModal', function (event) {
             var modal = document.getElementById(event.detail.id);
             if (modal) modal.innerHTML = '';
         });
+
+        (function () {
+            var webApp = window.Telegram && window.Telegram.WebApp;
+            if (!webApp) return;
+
+            if (typeof webApp.ready === 'function') webApp.ready();
+            if (typeof webApp.expand === 'function') webApp.expand();
+
+            var themeParams = webApp.themeParams || {};
+            Object.keys(themeParams).forEach(function (key) {
+                document.documentElement.style.setProperty(
+                    '--tg-theme-' + key.replace(/_/g, '-'),
+                    themeParams[key]
+                );
+            });
+            document.body.classList.add('tg-theme-active');
+
+            var backButton = webApp.BackButton;
+            var isTopLevelPage = {% if request.resolver_match.url_name == 'index' or request.resolver_match.url_name == 'task_list' or request.resolver_match.url_name == 'project_list' %}true{% else %}false{% endif %};
+            if (backButton) {
+                if (isTopLevelPage) {
+                    backButton.hide();
+                } else {
+                    backButton.show();
+                    backButton.onClick(function () { window.history.back(); });
+                }
+            }
+
+            var isAuthenticated = {{ user.is_authenticated|yesno:'true,false' }};
+            var initData = webApp.initData;
+            if (isAuthenticated || typeof initData !== 'string' || !initData.trim()) return;
+
+            var overlay = document.getElementById('telegram-auth-overlay');
+            var loading = document.getElementById('telegram-auth-loading');
+            var error = document.getElementById('telegram-auth-error');
+            if (!overlay || !loading || !error) return;
+
+            overlay.hidden = false;
+            fetch('{% url "auth_telegram" %}', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({init_data: initData})
+            })
+                .then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (payload) {
+                        return {ok: response.ok, payload: payload};
+                    });
+                })
+                .then(function (result) {
+                    if (!result.ok || !result.payload.success) throw new Error('Telegram authentication failed');
+                    window.location.assign(result.payload.redirect_url || window.location.href);
+                })
+                .catch(function () {
+                    loading.hidden = true;
+                    error.hidden = false;
+                });
+        })();
     </script>
 </body>
 </html>

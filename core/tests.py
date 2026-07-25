@@ -1,9 +1,106 @@
+import json
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .models import Comment, Project, ProjectMembership, Stage, Task, Discussion, Message
+from .telegram_auth import InitDataValidationError
+
+
+class TelegramAuthenticationTests(TestCase):
+    @patch('core.views.validate_init_data')
+    def test_valid_init_data_creates_user_and_logs_in(self, validate_init_data):
+        validate_init_data.return_value = {
+            'id': 987654321,
+            'username': 'telegram_user',
+            'first_name': 'Ирина',
+            'last_name': 'Тестова',
+            'photo_url': 'https://example.com/avatar.jpg',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps({'init_data': 'valid-init-data'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'success': True, 'redirect_url': reverse('index')})
+        user = get_user_model().objects.get(telegram_id=987654321)
+        self.assertEqual(user.username, 'telegram_user')
+        self.assertEqual(user.first_name, 'Ирина')
+        self.assertEqual(user.last_name, 'Тестова')
+        self.assertEqual(user.photo_url, 'https://example.com/avatar.jpg')
+
+        next_response = self.client.get(reverse('index'))
+        self.assertTrue(next_response.wsgi_request.user.is_authenticated)
+        self.assertEqual(next_response.wsgi_request.user, user)
+
+    @patch('core.views.validate_init_data')
+    def test_valid_init_data_updates_existing_user(self, validate_init_data):
+        user = get_user_model().objects.create_user(
+            username='old_username',
+            telegram_id=123456789,
+            first_name='Старое',
+            last_name='Имя',
+        )
+        validate_init_data.return_value = {
+            'id': user.telegram_id,
+            'username': 'new_username',
+            'first_name': 'Новое',
+            'last_name': 'Имя',
+            'photo_url': 'https://example.com/new-avatar.jpg',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps({'init_data': 'valid-init-data'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user.refresh_from_db()
+        self.assertEqual(user.username, 'new_username')
+        self.assertEqual(user.first_name, 'Новое')
+        self.assertEqual(user.photo_url, 'https://example.com/new-avatar.jpg')
+        self.assertEqual(get_user_model().objects.count(), 1)
+
+    @patch('core.views.validate_init_data')
+    def test_invalid_init_data_returns_401_without_logging_in(self, validate_init_data):
+        validate_init_data.side_effect = InitDataValidationError('Неверная подпись')
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps({'init_data': 'invalid-init-data'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'error': 'Не удалось войти'})
+        self.assertFalse('_auth_user_id' in self.client.session)
+        self.assertFalse(get_user_model().objects.exists())
+
+    def test_empty_or_missing_init_data_returns_401(self):
+        for payload in ({}, {'init_data': ''}):
+            with self.subTest(payload=payload):
+                response = self.client.post(
+                    reverse('auth_telegram'),
+                    data=json.dumps(payload),
+                    content_type='application/json',
+                )
+                self.assertEqual(response.status_code, 401)
+                self.assertFalse('_auth_user_id' in self.client.session)
+
+    @override_settings(DEBUG=True)
+    def test_dev_login_still_logs_in_and_redirects_home(self):
+        response = self.client.get(reverse('dev_login'))
+
+        self.assertRedirects(response, reverse('index'))
+        user = get_user_model().objects.get(telegram_id=111222333)
+        self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
 
 
 class DevAccountSwitcherTests(TestCase):

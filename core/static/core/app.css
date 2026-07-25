@@ -1,15 +1,15 @@
 :root {
-  --app-bg: #f5f6f7;
-  --surface: #ffffff;
-  --surface-soft: #f7f8fa;
+  --app-bg: var(--tg-theme-bg-color, #f5f6f7);
+  --surface: var(--tg-theme-secondary-bg-color, #ffffff);
+  --surface-soft: var(--tg-theme-section-bg-color, #f7f8fa);
   --surface-strong: #f1f3f6;
   --sidebar: #0f172a;
   --sidebar-active: rgba(255, 255, 255, 0.12);
-  --text: #2d2d2d;
-  --muted: #6b6b6b;
+  --text: var(--tg-theme-text-color, #2d2d2d);
+  --muted: var(--tg-theme-hint-color, #6b6b6b);
   --subtle: #a7a7a7;
   --border: #e4e4e4;
-  --primary: #2d2d2d;
+  --primary: var(--tg-theme-button-color, #2d2d2d);
   --green: #039855;
   --green-bg: #ecfdf3;
   --amber: #e66b00;
@@ -1396,6 +1396,58 @@ a {
 .auth-copy {
   margin: 0 0 22px;
   color: var(--muted);
+}
+
+.tg-theme-active .btn-primary {
+  color: var(--tg-theme-button-text-color, #fff);
+}
+
+.tg-theme-active .btn-primary:hover {
+  background: var(--primary);
+  filter: brightness(0.94);
+}
+
+.telegram-auth-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--app-bg);
+}
+
+.telegram-auth-overlay__card {
+  width: min(360px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  padding: 32px;
+  text-align: center;
+}
+
+.telegram-auth-overlay__spinner {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 16px;
+  border: 3px solid var(--surface-strong);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: telegram-auth-spin 0.75s linear infinite;
+}
+
+.telegram-auth-overlay__message,
+.telegram-auth-overlay__error {
+  margin: 0;
+  color: var(--text);
+}
+
+.telegram-auth-overlay__error {
+  color: var(--red);
+}
+
+@keyframes telegram-auth-spin {
+  to { transform: rotate(360deg); }
 }
 
 .scroll-area {

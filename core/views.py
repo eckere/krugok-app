@@ -114,17 +114,20 @@ def auth_telegram(request):
     Тело запроса (JSON): {"init_data": "<window.Telegram.WebApp.initData>"}
     """
     try:
-        payload = json.loads(request.body)
-    except (json.JSONDecodeError, TypeError):
-        return JsonResponse({'ok': False, 'error': 'Некорректное тело запроса'}, status=400)
+        payload = json.loads(request.body or '{}')
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        payload = {}
 
-    init_data = payload.get('init_data', '')
+    init_data = payload.get('init_data', '') if isinstance(payload, dict) else ''
+    if not isinstance(init_data, str):
+        init_data = ''
 
     try:
         tg_user = validate_init_data(init_data)
     except InitDataValidationError as exc:
         logger.warning('Отклонена попытка входа в Mini App: %s', exc)
-        return JsonResponse({'ok': False, 'error': str(exc)}, status=403)
+        # Причину держим только в серверном логе: она не должна попадать в UI.
+        return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
     telegram_id = tg_user['id']
     username = tg_user.get('username') or f'tg_{telegram_id}'
@@ -139,7 +142,7 @@ def auth_telegram(request):
         },
     )
     login(request, user)
-    return JsonResponse({'ok': True, 'user': {'id': user.id, 'display_name': user.display_name}})
+    return JsonResponse({'success': True, 'redirect_url': reverse('index')})
 
 
 # ---------------------------------------------------------------------------

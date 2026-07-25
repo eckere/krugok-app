@@ -12,14 +12,23 @@
         hx-target="#task-list" hx-swap="beforeend"
         {% endif %}>
     {% csrf_token %}
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
     <div class="space-y-3">
-      {% for field in form %}
+      {% for field in form.visible_fields %}
+        {% if field.name != 'stage' and field.name != 'assignee' %}
         <div>
           <label class="mb-1 block text-sm font-medium text-gray-700">{{ field.label }}</label>
           {{ field }}
           {% if field.errors %}<div class="mt-1 text-sm text-red-600">{{ field.errors|join:', ' }}</div>{% endif %}
         </div>
+        {% if field.name == 'project' %}
+          {% include 'core/tasks/dependent_fields.html' %}
+        {% endif %}
+        {% endif %}
       {% endfor %}
+      {% if form.non_field_errors %}
+        <div class="text-sm text-red-600">{{ form.non_field_errors|join:', ' }}</div>
+      {% endif %}
     </div>
     <div class="mt-4 flex gap-2">
       <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">Сохранить</button>

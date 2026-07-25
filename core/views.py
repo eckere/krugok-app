@@ -143,21 +143,67 @@ def task_create(request):
                             в конец #task-list, как и задаёт form.html);
                             ошибка -> форма с ошибками (перерисовывается в модалке)
     """
+    return_to = request.POST.get('return_to') or request.GET.get('return_to')
+    initial = {}
+    if request.method == 'GET':
+        project_id = request.GET.get('project')
+        stage_id = request.GET.get('stage')
+        if stage_id:
+            stage = get_stage_or_403(stage_id, request.user)
+            initial.update({'project': stage.project, 'stage': stage})
+        elif project_id:
+            project = get_project_or_403(project_id, request.user)
+            initial['project'] = project
+
     if request.method == 'POST':
         form = TaskForm(request.POST, user=request.user)
         if form.is_valid():
             task = form.save(commit=False)
             task.creator = request.user
             task.save()
-            return render(request, 'core/tasks/card.html', {'task': task})
-        return render(
+            response = render(
+                request,
+                'core/tasks/card.html',
+                {'task': task, 'task_project_context': return_to == 'project'},
+            )
+            if request.htmx and return_to == 'project' and task.project_id:
+                if task.stage_id:
+                    target = f'#stage-{task.stage_id}-task-list'
+                else:
+                    target = '#project-unassigned-task-list'
+                response.headers['HX-Retarget'] = target
+                response.headers['HX-Reswap'] = 'beforeend'
+            return response
+        response = render(
             request,
             'core/tasks/form.html',
-            {'form': form},
+            {'form': form, 'return_to': return_to},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#task-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
-    return render(request, 'core/tasks/form.html', {'form': TaskForm(user=request.user)})
+    return render(
+        request,
+        'core/tasks/form.html',
+        {
+            'form': TaskForm(user=request.user, initial=initial),
+            'return_to': return_to,
+        },
+    )
+
+
+@login_required
+@require_http_methods(['GET'])
+def task_form_options(request):
+    form = TaskForm(request.GET or None, user=request.user)
+    return render(
+        request,
+        'core/tasks/dependent_fields.html',
+        {'form': form},
+    )
 
 
 @login_required
@@ -169,23 +215,40 @@ def task_update(request, task_id):
                                 append в конец списка — иначе получим дубль)
     """
     task = get_task_or_403(task_id, request.user, permission='edit')
+    return_to = request.POST.get('return_to') or request.GET.get('return_to')
 
     if request.method == 'POST':
         form = TaskForm(request.POST, instance=task, user=request.user)
         if form.is_valid():
             form.save()
+            if return_to == 'project':
+                redirect_url = (
+                    reverse('project_detail', args=[task.project_id])
+                    if task.project_id
+                    else reverse('task_list')
+                )
+                return HttpResponse(
+                    headers={'HX-Redirect': redirect_url}
+                )
             return render(request, 'core/tasks/card.html', {'task': task})
-        return render(
+        response = render(
             request,
             'core/tasks/form.html',
-            {'form': form},
+            {'form': form, 'return_to': return_to},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#task-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(
         request,
         'core/tasks/form.html',
-        {'form': TaskForm(instance=task, user=request.user)},
+        {
+            'form': TaskForm(instance=task, user=request.user),
+            'return_to': return_to,
+        },
     )
 
 
@@ -217,7 +280,14 @@ def task_status(request, task_id):
     order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
     task.status = order[(order.index(task.status) + 1) % len(order)]
     task.save()
-    return render(request, 'core/tasks/card.html', {'task': task})
+    return render(
+        request,
+        'core/tasks/card.html',
+        {
+            'task': task,
+            'task_project_context': request.POST.get('return_to') == 'project',
+        },
+    )
 
 
 @login_required
@@ -263,14 +333,27 @@ def project_list(request):
 @login_required
 def project_detail(request, project_id):
     project = get_project_or_403(project_id, request.user)
-    stages = project.stages.filter(is_archived=False).order_by('order')
+    project_tasks = Task.objects.filter(project=project).select_related(
+        'assignee', 'stage'
+    ).order_by('status', 'deadline', '-created_at')
+    stages = project.stages.filter(is_archived=False).prefetch_related(
+        models.Prefetch('tasks', queryset=project_tasks)
+    ).order_by('order')
+    unassigned_tasks = project_tasks.filter(
+        models.Q(stage__isnull=True) | models.Q(stage__is_archived=True)
+    )
     memberships = project.project_memberships.select_related('user').order_by(
         'role', 'user__first_name', 'user__username'
     )
     return render(
         request,
         'core/projects/detail.html',
-        {'project': project, 'stages': stages, 'memberships': memberships},
+        {
+            'project': project,
+            'stages': stages,
+            'unassigned_tasks': unassigned_tasks,
+            'memberships': memberships,
+        },
     )
 
 

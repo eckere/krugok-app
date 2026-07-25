@@ -619,6 +619,201 @@ class AccessControlRegressionTests(TestCase):
         self.assertContains(response, standalone.title)
 
 
+class ProjectTaskWorkflowTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username='workflow_owner')
+        self.member = user_model.objects.create_user(username='workflow_member')
+        self.outsider = user_model.objects.create_user(username='workflow_outsider')
+
+        self.project = Project.objects.create(name='Workflow project', owner=self.owner)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.owner,
+            role=ProjectMembership.Role.OWNER,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.member,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.stage_one = Stage.objects.create(
+            project=self.project,
+            name='Stage one',
+            order=1,
+        )
+        self.stage_two = Stage.objects.create(
+            project=self.project,
+            name='Stage two',
+            order=2,
+        )
+
+        self.foreign_project = Project.objects.create(
+            name='Foreign workflow',
+            owner=self.outsider,
+        )
+        ProjectMembership.objects.create(
+            project=self.foreign_project,
+            user=self.outsider,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.foreign_stage = Stage.objects.create(
+            project=self.foreign_project,
+            name='Foreign stage',
+            order=1,
+        )
+
+    def test_project_detail_shows_staged_and_unassigned_tasks(self):
+        staged_task = Task.objects.create(
+            title='Task inside stage',
+            project=self.project,
+            stage=self.stage_one,
+            creator=self.owner,
+        )
+        unassigned_task = Task.objects.create(
+            title='Task without stage',
+            project=self.project,
+            creator=self.owner,
+        )
+        self.client.force_login(self.member)
+
+        response = self.client.get(reverse('project_detail', args=[self.project.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, staged_task.title)
+        self.assertContains(response, unassigned_task.title)
+        self.assertContains(response, f'stage-{self.stage_one.id}-task-list')
+        self.assertContains(response, 'project-unassigned-task-list')
+
+    def test_task_create_from_stage_preselects_project_and_stage(self):
+        self.client.force_login(self.member)
+        response = self.client.get(
+            reverse('task_create'),
+            {
+                'project': self.project.id,
+                'stage': self.stage_two.id,
+                'return_to': 'project',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['form'].initial['project'], self.project)
+        self.assertEqual(response.context['form'].initial['stage'], self.stage_two)
+        self.assertEqual(response.context['return_to'], 'project')
+
+    def test_member_can_create_task_in_stage_with_htmx_retarget(self):
+        self.client.force_login(self.member)
+        response = self.client.post(
+            reverse('task_create'),
+            {
+                'title': 'Created from stage',
+                'description': '',
+                'project': self.project.id,
+                'stage': self.stage_one.id,
+                'assignee': self.member.id,
+                'deadline': '',
+                'status': Task.Status.NEW,
+                'return_to': 'project',
+            },
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers['HX-Retarget'],
+            f'#stage-{self.stage_one.id}-task-list',
+        )
+        self.assertEqual(response.headers['HX-Reswap'], 'beforeend')
+        task = Task.objects.get(title='Created from stage')
+        self.assertEqual(task.project, self.project)
+        self.assertEqual(task.stage, self.stage_one)
+        self.assertEqual(task.creator, self.member)
+
+    def test_dependent_fields_only_offer_project_stages_and_members(self):
+        self.client.force_login(self.member)
+        response = self.client.get(
+            reverse('task_form_options'),
+            {'project': self.project.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context['form']
+        self.assertQuerySetEqual(
+            form.fields['stage'].queryset.order_by('id'),
+            [self.stage_one, self.stage_two],
+        )
+        self.assertQuerySetEqual(
+            form.fields['assignee'].queryset.order_by('id'),
+            [self.owner, self.member],
+        )
+        self.assertNotIn(self.foreign_stage, form.fields['stage'].queryset)
+        self.assertNotIn(self.outsider, form.fields['assignee'].queryset)
+
+    def test_foreign_project_cannot_be_opened_through_task_create_context(self):
+        self.client.force_login(self.member)
+        response = self.client.get(
+            reverse('task_create'),
+            {'project': self.foreign_project.id, 'return_to': 'project'},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_task_move_between_stages_redirects_to_project(self):
+        task = Task.objects.create(
+            title='Move me',
+            project=self.project,
+            stage=self.stage_one,
+            creator=self.member,
+            assignee=self.member,
+        )
+        self.client.force_login(self.member)
+
+        response = self.client.post(
+            reverse('task_update', args=[task.id]),
+            {
+                'title': task.title,
+                'description': '',
+                'project': self.project.id,
+                'stage': self.stage_two.id,
+                'assignee': self.member.id,
+                'deadline': '',
+                'status': Task.Status.IN_PROGRESS,
+                'return_to': 'project',
+            },
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers['HX-Redirect'],
+            reverse('project_detail', args=[self.project.id]),
+        )
+        task.refresh_from_db()
+        self.assertEqual(task.stage, self.stage_two)
+
+    def test_invalid_project_task_form_returns_errors_to_modal(self):
+        self.client.force_login(self.member)
+        response = self.client.post(
+            reverse('task_create'),
+            {
+                'title': '',
+                'description': '',
+                'project': self.project.id,
+                'stage': self.stage_one.id,
+                'assignee': self.member.id,
+                'deadline': '',
+                'status': Task.Status.NEW,
+                'return_to': 'project',
+            },
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['HX-Retarget'], '#task-modal')
+        self.assertEqual(response.headers['HX-Reswap'], 'innerHTML')
+        self.assertTrue(response.context['form'].errors.get('title'))
+
+
 class TaskDetailAndCommentsTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username='commenter', password='pass')

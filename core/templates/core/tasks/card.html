@@ -17,10 +17,19 @@
     </div>
     <div class="flex flex-wrap gap-2">
       {% if task|can_manage_task:user %}
-      <button type="button" hx-get="{% url 'task_update' task.id %}" hx-target="#task-modal" hx-swap="innerHTML" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Ред.</button>
+      <button type="button"
+              hx-get="{% url 'task_update' task.id %}{% if task_project_context %}?return_to=project{% endif %}"
+              hx-target="#task-modal"
+              hx-swap="innerHTML"
+              class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Ред.</button>
       {% endif %}
       {% if task|can_update_task_status:user %}
-      <button type="button" hx-post="{% url 'task_status' task.id %}" hx-target="#task-{{ task.id }}" hx-swap="outerHTML" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Статус</button>
+      <button type="button"
+              hx-post="{% url 'task_status' task.id %}"
+              {% if task_project_context %}hx-vals='{"return_to": "project"}'{% endif %}
+              hx-target="#task-{{ task.id }}"
+              hx-swap="outerHTML"
+              class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Статус</button>
       {% endif %}
       {% if task|can_manage_task:user %}
       <button type="button" hx-delete="{% url 'task_delete' task.id %}" hx-target="#task-{{ task.id }}" hx-swap="outerHTML" hx-confirm="Удалить задачу?" class="rounded-md border border-red-200 px-2 py-1 text-sm text-red-600">Удалить</button>

@@ -32,6 +32,7 @@
 
     <div id="stage-modal"></div>
     <div id="member-modal"></div>
+    <div id="task-modal"></div>
 
     <div class="mb-6 rounded-2xl border border-gray-200 bg-slate-50 p-4">
       <div class="flex items-center justify-between gap-3">
@@ -77,6 +78,31 @@
         {% empty %}
           <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">Этапов пока нет.</div>
         {% endfor %}
+      </div>
+
+      <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900">Без этапа</h2>
+            <p class="text-sm text-gray-500">Задачи проекта, которые ещё не распределены</p>
+          </div>
+          <button type="button"
+                  hx-get="{% url 'task_create' %}?project={{ project.id }}&return_to=project"
+                  hx-target="#task-modal"
+                  hx-swap="innerHTML"
+                  class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">
+            + Задача
+          </button>
+        </div>
+        <div id="project-unassigned-task-list" class="space-y-2">
+          {% for task in unassigned_tasks %}
+            {% include 'core/tasks/card.html' with task_project_context=True %}
+          {% empty %}
+            <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">
+              Нераспределённых задач нет.
+            </div>
+          {% endfor %}
+        </div>
       </div>
     </div>
   </div>

@@ -1,4 +1,5 @@
 from django import forms
+from django.urls import reverse
 
 from .models import (
     Comment,
@@ -95,27 +96,38 @@ class TaskForm(forms.ModelForm):
 
         projects = get_accessible_projects(self.user)
         self.fields['project'].queryset = projects
+        self.fields['project'].widget.attrs.update(
+            {
+                'hx-get': reverse('task_form_options'),
+                'hx-trigger': 'change',
+                'hx-target': '#task-dependent-fields',
+                'hx-swap': 'outerHTML',
+                'hx-include': 'closest form',
+            }
+        )
 
         project_id = None
         if self.is_bound:
             project_id = self.data.get(self.add_prefix('project'))
         elif self.instance.pk:
             project_id = self.instance.project_id
+        else:
+            initial_project = self.initial.get('project')
+            project_id = getattr(initial_project, 'pk', initial_project)
 
-        stages = Stage.objects.filter(
-            project__in=projects,
-            project__is_archived=False,
-            is_archived=False,
-        )
+        stages = Stage.objects.none()
         assignees = TelegramUser.objects.filter(is_active=True)
         if project_id:
             try:
                 project = projects.get(pk=project_id)
             except (Project.DoesNotExist, TypeError, ValueError):
-                stages = Stage.objects.none()
                 assignees = TelegramUser.objects.none()
             else:
-                stages = stages.filter(project=project)
+                stages = Stage.objects.filter(
+                    project=project,
+                    project__is_archived=False,
+                    is_archived=False,
+                )
                 assignees = project.get_members().filter(is_active=True)
 
         self.fields['stage'].queryset = stages

@@ -151,10 +151,12 @@ X_FRAME_OPTIONS = 'ALLOWALL'
 #    в контексте чужого документа (telegram.org), т.е. это third-party
 #    context. SameSite=Lax (дефолт Django) такие куки на POST-запросы
 #    из iframe может резать. SameSite=None требует Secure=True (HTTPS),
-#    поэтому включаем это только вне DEBUG — на VPS у нас будет HTTPS
-#    (Шаг деплоя), а локально Mini App тестируется через https-туннель
-#    (ngrok), где эти настройки тоже нужно будет включить руками.
-if not DEBUG:
+#    поэтому включаем это вне DEBUG — на VPS у нас будет HTTPS. Для локальной
+#    проверки через HTTPS-туннель задайте TELEGRAM_SECURE_COOKIES=True в .env.
+TELEGRAM_SECURE_COOKIES = (
+    not DEBUG or os.environ.get('TELEGRAM_SECURE_COOKIES', 'False') == 'True'
+)
+if TELEGRAM_SECURE_COOKIES:
     SESSION_COOKIE_SAMESITE = 'None'
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SAMESITE = 'None'

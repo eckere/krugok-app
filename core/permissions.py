@@ -12,7 +12,6 @@ def get_accessible_projects(user, *, include_archived: bool = False) -> QuerySet
         projects = Project.objects.filter(
             Q(owner=user)
             | Q(project_memberships__user=user)
-            | Q(members=user)
         ).distinct()
     if not include_archived:
         projects = projects.filter(is_archived=False)

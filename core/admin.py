@@ -20,7 +20,6 @@ class ProjectAdmin(admin.ModelAdmin):
     list_display = ('name', 'owner', 'is_archived', 'created_at')
     list_filter = ('is_archived', 'created_at')
     search_fields = ('name', 'description', 'owner__username')
-    filter_horizontal = ('members',)
 
 
 @admin.register(Task)

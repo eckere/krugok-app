@@ -31,6 +31,35 @@
     </div>
 
     <div id="stage-modal"></div>
+    <div id="member-modal"></div>
+
+    <div class="mb-6 rounded-2xl border border-gray-200 bg-slate-50 p-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Участники</h2>
+          <p class="text-sm text-gray-500">Доступ к проекту и роли участников</p>
+        </div>
+        {% if project|can_own_project:user %}
+          <button type="button"
+                  hx-get="{% url 'project_member_create' project.id %}"
+                  hx-target="#member-modal"
+                  hx-swap="innerHTML"
+                  class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
+            + Участник
+          </button>
+        {% endif %}
+      </div>
+
+      <div id="member-list" class="mt-4 space-y-2">
+        {% for membership in memberships %}
+          {% include 'core/projects/members/card.html' %}
+        {% empty %}
+          <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">
+            Участников пока нет.
+          </div>
+        {% endfor %}
+      </div>
+    </div>
 
     <div class="space-y-4">
       <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">

@@ -11,7 +11,11 @@ class StageAndProjectTests(TestCase):
         self.user = get_user_model().objects.create_user(username='tester', password='pass')
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project 1', description='Test project', owner=self.user)
-        self.project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
 
     def test_project_detail_shows_stages(self):
         Stage.objects.create(project=self.project, name='Stage 1', order=1)
@@ -56,7 +60,11 @@ class StageAndProjectTests(TestCase):
 
     def test_task_stage_must_belong_to_project(self):
         other_project = Project.objects.create(name='Other', description='Other project', owner=self.user)
-        other_project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=other_project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         other_stage = Stage.objects.create(project=other_project, name='Другой этап', order=1)
         task = Task(title='Задача', project=self.project, stage=other_stage, creator=self.user)
         with self.assertRaises(ValidationError):
@@ -68,7 +76,11 @@ class TaskCrudTests(TestCase):
         self.user = get_user_model().objects.create_user(username='tasker', password='pass')
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project Task', description='Test project', owner=self.user)
-        self.project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
 
     def test_create_task(self):
         response = self.client.post(reverse('task_create'), {
@@ -134,7 +146,11 @@ class ProjectCrudTests(TestCase):
     def test_project_list_excludes_archived(self):
         Project.objects.create(name='Archived', description='X', owner=self.user, is_archived=True)
         active = Project.objects.create(name='Active', description='Y', owner=self.user)
-        active.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=active,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         response = self.client.get(reverse('project_list'))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Active')
@@ -142,7 +158,11 @@ class ProjectCrudTests(TestCase):
 
     def test_archive_project_keeps_row(self):
         project = Project.objects.create(name='Project Z', description='Desc', owner=self.user)
-        project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         response = self.client.post(reverse('project_archive', args=[project.id]))
         self.assertEqual(response.status_code, 200)
         project.refresh_from_db()
@@ -171,9 +191,169 @@ class ProjectMembershipTests(TestCase):
 
     def test_is_member_returns_true_for_existing_members(self):
         project = Project.objects.create(name='Member Project', description='Desc', owner=self.user)
-        project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         self.assertTrue(project.is_member(self.user))
         self.assertIn(self.user, list(project.get_members()))
+
+
+class ProjectMembershipCrudTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username='membership_owner')
+        self.admin = user_model.objects.create_user(username='membership_admin')
+        self.candidate = user_model.objects.create_user(username='membership_candidate')
+        self.project = Project.objects.create(name='Membership project', owner=self.owner)
+        self.owner_membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.owner,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.admin_membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.admin,
+            role=ProjectMembership.Role.ADMIN,
+        )
+
+    def test_members_relation_uses_project_membership_as_source(self):
+        self.assertIn(self.owner, self.project.members.all())
+        self.assertIn(self.admin, self.project.members.all())
+        self.assertEqual(self.project.members.count(), 2)
+
+    def test_owner_can_add_member(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse('project_member_create', args=[self.project.id]),
+            {
+                'user': self.candidate.id,
+                'role': ProjectMembership.Role.MEMBER,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        membership = ProjectMembership.objects.get(
+            project=self.project,
+            user=self.candidate,
+        )
+        self.assertEqual(membership.role, ProjectMembership.Role.MEMBER)
+        self.assertTrue(self.project.is_member(self.candidate))
+
+    def test_owner_can_change_member_role(self):
+        membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.candidate,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse('project_member_update', args=[membership.id]),
+            {'role': ProjectMembership.Role.ADMIN},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, ProjectMembership.Role.ADMIN)
+        self.assertTrue(self.project.is_admin(self.candidate))
+
+    def test_owner_can_remove_member_and_revoke_project_access(self):
+        membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.candidate,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.client.force_login(self.owner)
+
+        response = self.client.delete(
+            reverse('project_member_delete', args=[membership.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ProjectMembership.objects.filter(pk=membership.pk).exists())
+        self.assertFalse(self.project.is_member(self.candidate))
+
+        self.client.force_login(self.candidate)
+        self.assertEqual(
+            self.client.get(reverse('project_detail', args=[self.project.id])).status_code,
+            403,
+        )
+
+    def test_admin_cannot_manage_project_members(self):
+        membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.candidate,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.client.force_login(self.admin)
+
+        create_response = self.client.post(
+            reverse('project_member_create', args=[self.project.id]),
+            {'user': self.candidate.id, 'role': ProjectMembership.Role.MEMBER},
+        )
+        update_response = self.client.post(
+            reverse('project_member_update', args=[membership.id]),
+            {'role': ProjectMembership.Role.ADMIN},
+        )
+        delete_response = self.client.delete(
+            reverse('project_member_delete', args=[membership.id])
+        )
+
+        self.assertEqual(create_response.status_code, 403)
+        self.assertEqual(update_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+
+    def test_owner_membership_cannot_be_changed_or_deleted(self):
+        self.client.force_login(self.owner)
+
+        update_response = self.client.post(
+            reverse('project_member_update', args=[self.owner_membership.id]),
+            {'role': ProjectMembership.Role.MEMBER},
+        )
+        delete_response = self.client.delete(
+            reverse('project_member_delete', args=[self.owner_membership.id])
+        )
+
+        self.assertEqual(update_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+        self.owner_membership.refresh_from_db()
+        self.assertEqual(self.owner_membership.role, ProjectMembership.Role.OWNER)
+
+    def test_member_form_does_not_offer_owner_role(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse('project_member_create', args=[self.project.id]),
+            {
+                'user': self.candidate.id,
+                'role': ProjectMembership.Role.OWNER,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(
+            ProjectMembership.objects.filter(
+                project=self.project,
+                user=self.candidate,
+            ).exists()
+        )
+
+    def test_model_rejects_invalid_owner_roles(self):
+        with self.assertRaises(ValidationError):
+            ProjectMembership.objects.create(
+                project=self.project,
+                user=self.candidate,
+                role=ProjectMembership.Role.OWNER,
+            )
+
+        self.owner_membership.role = ProjectMembership.Role.MEMBER
+        with self.assertRaises(ValidationError):
+            self.owner_membership.save()
+
+        self.owner_membership.refresh_from_db()
+        with self.assertRaises(ValidationError):
+            self.owner_membership.delete()
 
 
 class PermissionTests(TestCase):
@@ -182,7 +362,11 @@ class PermissionTests(TestCase):
         self.other = get_user_model().objects.create_user(username='other', password='pass')
         self.client.force_login(self.other)
         self.project = Project.objects.create(name='Protected', description='X', owner=self.user)
-        self.project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         self.task = Task.objects.create(title='Private', description='Desc', project=self.project, creator=self.user)
 
     def test_project_detail_forbidden_for_non_member(self):
@@ -440,7 +624,11 @@ class TaskDetailAndCommentsTests(TestCase):
         self.user = get_user_model().objects.create_user(username='commenter', password='pass')
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project C', description='X', owner=self.user)
-        self.project.members.add(self.user)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
         self.task = Task.objects.create(title='Task C', description='Desc', project=self.project, creator=self.user)
 
     def test_task_detail_contains_title_and_description(self):

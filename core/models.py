@@ -35,6 +35,7 @@ class Project(models.Model):
     )
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
+        through='ProjectMembership',
         related_name='projects',
         blank=True,
     )
@@ -51,16 +52,13 @@ class Project(models.Model):
 
     def get_members(self):
         return TelegramUser.objects.filter(
-            models.Q(pk=self.owner_id)
-            | models.Q(project_memberships__project=self)
-            | models.Q(projects=self)
+            models.Q(pk=self.owner_id) | models.Q(project_memberships__project=self)
         ).distinct()
 
     def is_member(self, user):
         return (
             self.owner_id == user.id
             or self.project_memberships.filter(user=user).exists()
-            or self.members.filter(pk=user.pk).exists()
         )
 
     def is_admin(self, user):
@@ -99,6 +97,25 @@ class ProjectMembership(models.Model):
 
     def __str__(self):
         return f'{self.user} ({self.get_role_display()}) in {self.project}'
+
+    def clean(self):
+        super().clean()
+        if not self.project_id or not self.user_id:
+            return
+        is_project_owner = self.project.owner_id == self.user_id
+        if is_project_owner and self.role != self.Role.OWNER:
+            raise ValidationError({'role': 'Владелец проекта должен иметь роль владельца.'})
+        if self.role == self.Role.OWNER and not is_project_owner:
+            raise ValidationError({'role': 'Роль владельца доступна только владельцу проекта.'})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.project_id and self.user_id == self.project.owner_id:
+            raise ValidationError('Нельзя удалить членство владельца проекта.')
+        return super().delete(*args, **kwargs)
 
 
 class Stage(models.Model):

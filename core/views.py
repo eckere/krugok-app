@@ -7,6 +7,7 @@ import logging
 from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db import models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -14,7 +15,16 @@ from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .forms import CommentForm, ProjectForm, StageForm, TaskForm, DiscussionForm, MessageForm
+from .forms import (
+    CommentForm,
+    DiscussionForm,
+    MessageForm,
+    ProjectForm,
+    ProjectMembershipCreateForm,
+    ProjectMembershipRoleForm,
+    StageForm,
+    TaskForm,
+)
 from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser, Discussion, Message
 from .permissions import (
     get_accessible_projects,
@@ -254,7 +264,14 @@ def project_list(request):
 def project_detail(request, project_id):
     project = get_project_or_403(project_id, request.user)
     stages = project.stages.filter(is_archived=False).order_by('order')
-    return render(request, 'core/projects/detail.html', {'project': project, 'stages': stages})
+    memberships = project.project_memberships.select_related('user').order_by(
+        'role', 'user__first_name', 'user__username'
+    )
+    return render(
+        request,
+        'core/projects/detail.html',
+        {'project': project, 'stages': stages, 'memberships': memberships},
+    )
 
 
 @login_required
@@ -271,7 +288,6 @@ def project_create(request):
             project = form.save(commit=False)
             project.owner = request.user
             project.save()
-            project.members.add(request.user)
             ProjectMembership.objects.create(
                 project=project,
                 user=request.user,
@@ -338,6 +354,95 @@ def project_archive(request, project_id):
     project.save()
     if request.POST.get('return_to') == 'projects':
         return HttpResponse(headers={'HX-Redirect': reverse('project_list')})
+    return HttpResponse(status=200)
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def project_member_create(request, project_id):
+    project = get_project_or_403(project_id, request.user, required_role='owner')
+    if request.method == 'POST':
+        form = ProjectMembershipCreateForm(request.POST, project=project)
+        if form.is_valid():
+            membership = form.save(commit=False)
+            membership.project = project
+            membership.save()
+            return render(
+                request,
+                'core/projects/members/card.html',
+                {'project': project, 'membership': membership},
+            )
+        return render(
+            request,
+            'core/projects/members/form.html',
+            {'project': project, 'form': form},
+            status=200 if request.htmx else 422,
+        )
+
+    return render(
+        request,
+        'core/projects/members/form.html',
+        {'project': project, 'form': ProjectMembershipCreateForm(project=project)},
+    )
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def project_member_update(request, membership_id):
+    membership = get_object_or_404(
+        ProjectMembership.objects.select_related('project', 'user'),
+        pk=membership_id,
+    )
+    project = get_project_or_403(
+        membership.project_id,
+        request.user,
+        required_role='owner',
+    )
+    if membership.user_id == project.owner_id:
+        raise PermissionDenied
+
+    if request.method == 'POST':
+        form = ProjectMembershipRoleForm(request.POST, instance=membership)
+        if form.is_valid():
+            membership = form.save()
+            return render(
+                request,
+                'core/projects/members/card.html',
+                {'project': project, 'membership': membership},
+            )
+        return render(
+            request,
+            'core/projects/members/form.html',
+            {'project': project, 'membership': membership, 'form': form},
+            status=200 if request.htmx else 422,
+        )
+
+    return render(
+        request,
+        'core/projects/members/form.html',
+        {
+            'project': project,
+            'membership': membership,
+            'form': ProjectMembershipRoleForm(instance=membership),
+        },
+    )
+
+
+@login_required
+@require_http_methods(['DELETE'])
+def project_member_delete(request, membership_id):
+    membership = get_object_or_404(
+        ProjectMembership.objects.select_related('project'),
+        pk=membership_id,
+    )
+    project = get_project_or_403(
+        membership.project_id,
+        request.user,
+        required_role='owner',
+    )
+    if membership.user_id == project.owner_id:
+        raise PermissionDenied
+    membership.delete()
     return HttpResponse(status=200)
 
 

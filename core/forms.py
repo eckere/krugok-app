@@ -1,6 +1,15 @@
 from django import forms
 
-from .models import Comment, Project, Stage, Task, Discussion, Message, TelegramUser
+from .models import (
+    Comment,
+    Discussion,
+    Message,
+    Project,
+    ProjectMembership,
+    Stage,
+    Task,
+    TelegramUser,
+)
 from .permissions import get_accessible_projects, get_accessible_tasks
 
 
@@ -129,6 +138,57 @@ class ProjectForm(forms.ModelForm):
             'name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'placeholder': 'Например, «Курс по истории — Древний мир»'}),
             'description': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 3}),
         }
+
+
+class ProjectMembershipCreateForm(forms.ModelForm):
+    class Meta:
+        model = ProjectMembership
+        fields = ['user', 'role']
+        widgets = {
+            'user': forms.Select(
+                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
+            ),
+            'role': forms.Select(
+                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
+            ),
+        }
+        labels = {
+            'user': 'Пользователь',
+            'role': 'Роль',
+        }
+
+    def __init__(self, *args, **kwargs):
+        self.project = kwargs.pop('project')
+        super().__init__(*args, **kwargs)
+        existing_user_ids = self.project.project_memberships.values_list(
+            'user_id', flat=True
+        )
+        self.fields['user'].queryset = TelegramUser.objects.filter(
+            is_active=True
+        ).exclude(pk__in=existing_user_ids)
+        self.fields['role'].choices = [
+            (ProjectMembership.Role.ADMIN, ProjectMembership.Role.ADMIN.label),
+            (ProjectMembership.Role.MEMBER, ProjectMembership.Role.MEMBER.label),
+        ]
+
+
+class ProjectMembershipRoleForm(forms.ModelForm):
+    class Meta:
+        model = ProjectMembership
+        fields = ['role']
+        widgets = {
+            'role': forms.Select(
+                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
+            ),
+        }
+        labels = {'role': 'Роль'}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['role'].choices = [
+            (ProjectMembership.Role.ADMIN, ProjectMembership.Role.ADMIN.label),
+            (ProjectMembership.Role.MEMBER, ProjectMembership.Role.MEMBER.label),
+        ]
 
 
 class CommentForm(forms.ModelForm):

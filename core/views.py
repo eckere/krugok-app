@@ -93,6 +93,18 @@ def dev_login(request):
     return redirect('index')
 
 
+@login_required
+@require_POST
+def dev_switch_account(request, user_id):
+    """Переключает локальную сессию между тестовыми пользователями."""
+    if not settings.DEBUG:
+        raise Http404
+
+    user = get_object_or_404(TelegramUser, pk=user_id, is_active=True)
+    login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+    return redirect('index')
+
+
 @require_POST
 def auth_telegram(request):
     """

@@ -44,8 +44,43 @@
             </div>
 
             <div class="app-user">
-                <div class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</div>
-                <div class="app-user__name">{{ user.display_name }}</div>
+                {% if dev_account_switcher_enabled %}
+                <details class="account-switcher">
+                    <summary class="account-switcher__summary" title="Сменить тестовый аккаунт">
+                        <div class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</div>
+                        <div class="app-user__identity">
+                            <div class="app-user__name">{{ user.display_name }}</div>
+                            <div class="app-user__hint">Сменить аккаунт</div>
+                        </div>
+                        <svg class="account-switcher__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <path d="m6 8 4 4 4-4"/>
+                        </svg>
+                    </summary>
+                    <div class="account-switcher__menu">
+                        <div class="account-switcher__title">Тестовые аккаунты</div>
+                        {% for account in dev_accounts %}
+                        <form method="post" action="{% url 'dev_switch_account' account.id %}">
+                            {% csrf_token %}
+                            <button type="submit"
+                                    class="account-option {% if account.id == user.id %}is-current{% endif %}"
+                                    {% if account.id == user.id %}disabled{% endif %}>
+                                <span class="account-option__avatar">{{ account.first_name|default:account.username|first|upper }}</span>
+                                <span class="account-option__copy">
+                                    <strong>{{ account.display_name }}</strong>
+                                    <small>@{{ account.username }}</small>
+                                </span>
+                                {% if account.id == user.id %}<span class="account-option__check">✓</span>{% endif %}
+                            </button>
+                        </form>
+                        {% empty %}
+                        <div class="account-switcher__empty">Других аккаунтов нет</div>
+                        {% endfor %}
+                    </div>
+                </details>
+                {% else %}
+                    <div class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</div>
+                    <div class="app-user__name">{{ user.display_name }}</div>
+                {% endif %}
             </div>
         </nav>
 

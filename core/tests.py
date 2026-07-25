@@ -1,9 +1,53 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .models import Comment, Project, ProjectMembership, Stage, Task, Discussion, Message
+
+
+class DevAccountSwitcherTests(TestCase):
+    def setUp(self):
+        self.current_user = get_user_model().objects.create_user(
+            username='current',
+            first_name='Текущий',
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username='other',
+            first_name='Другой',
+        )
+        self.client.force_login(self.current_user)
+
+    @override_settings(DEBUG=True)
+    def test_switches_to_active_account_and_redirects_home(self):
+        response = self.client.post(
+            reverse('dev_switch_account', args=[self.other_user.id])
+        )
+
+        self.assertRedirects(response, reverse('index'))
+        self.assertEqual(
+            int(self.client.session['_auth_user_id']),
+            self.other_user.id,
+        )
+
+    @override_settings(DEBUG=True)
+    def test_home_shows_available_test_accounts(self):
+        response = self.client.get(reverse('index'))
+
+        self.assertContains(response, 'Сменить аккаунт')
+        self.assertContains(response, self.other_user.display_name)
+
+    @override_settings(DEBUG=False)
+    def test_switcher_is_unavailable_outside_debug(self):
+        response = self.client.post(
+            reverse('dev_switch_account', args=[self.other_user.id])
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            int(self.client.session['_auth_user_id']),
+            self.current_user.id,
+        )
 
 
 class StageAndProjectTests(TestCase):

@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path('', views.index, name='index'),
     path('dev-login/', views.dev_login, name='dev_login'),
+    path('dev-switch-account/<int:user_id>/', views.dev_switch_account, name='dev_switch_account'),
     path('auth/telegram/', views.auth_telegram, name='auth_telegram'),
 
     path('tasks/', views.task_list, name='task_list'),

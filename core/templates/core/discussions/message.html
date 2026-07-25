@@ -1,4 +1,4 @@
-<article class="message {% if message.sender == request.user %}message--mine{% endif %}">
+<article id="message-{{ message.id }}" data-message-id="{{ message.id }}" class="message {% if message.sender == request.user %}message--mine{% endif %}">
   <div class="message__avatar">{{ message.sender.first_name|default:message.sender.username|first|upper }}</div>
   <div class="message__body">
     <div class="message__bubble">{{ message.text|linebreaksbr }}</div>

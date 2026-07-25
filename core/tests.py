@@ -973,9 +973,50 @@ class DiscussionAndMessageTests(TestCase):
         discussion.participants.add(self.user1)
 
         response = self.client.post(reverse('message_create', args=[discussion.id]), {'text': ''})
-        # As per the view logic, it redirects on failure for non-htmx, let's stick to that
-        self.assertEqual(response.status_code, 302)
+        # Ошибка валидации возвращается как OOB-обновление #message-error,
+        # а не редиректом: иначе HTMX вставил бы в историю целую страницу.
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'message-error', response.content)
         self.assertFalse(Message.objects.filter(discussion=discussion).exists())
+
+    def test_message_create_success_clears_error_and_placeholder_oob(self):
+        discussion = Discussion.objects.create(title='Chat OOB', created_by=self.user1)
+        discussion.participants.add(self.user1)
+
+        response = self.client.post(
+            reverse('message_create', args=[discussion.id]),
+            {'text': 'Hello OOB!'},
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'message-error')
+        self.assertContains(response, 'no-messages-placeholder')
+        self.assertContains(response, 'hx-swap-oob="delete"')
+
+    def test_message_poll_returns_only_messages_after_cursor(self):
+        discussion = Discussion.objects.create(title='Chat Poll', created_by=self.user1)
+        discussion.participants.add(self.user1)
+        first = Message.objects.create(
+            discussion=discussion,
+            sender=self.user1,
+            text='First',
+        )
+        second = Message.objects.create(
+            discussion=discussion,
+            sender=self.user2,
+            text='Second',
+        )
+
+        response = self.client.get(
+            reverse('discussion_messages_poll', args=[discussion.id]),
+            {'after': first.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'First')
+        self.assertContains(response, f'id="message-{second.id}"')
+        self.assertContains(response, 'Second')
 
     def test_non_participant_gets_403_on_detail(self):
         discussion = Discussion.objects.create(title='Private Chat', created_by=self.user2)
@@ -990,3 +1031,83 @@ class DiscussionAndMessageTests(TestCase):
         self.client.force_login(self.user1)
         response = self.client.post(reverse('message_create', args=[discussion.id]), {'text': 'Intrusion!'})
         self.assertEqual(response.status_code, 403)
+
+
+class HtmxModalErrorRetargetTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username='htmx_owner')
+        self.candidate = user_model.objects.create_user(username='htmx_candidate')
+        self.project = Project.objects.create(
+            name='HTMX project',
+            owner=self.owner,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.owner,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.candidate,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.stage = Stage.objects.create(
+            project=self.project,
+            name='HTMX stage',
+            order=1,
+        )
+        self.client.force_login(self.owner)
+
+    def assert_modal_error(self, response, modal_id):
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['HX-Retarget'], modal_id)
+        self.assertEqual(response.headers['HX-Reswap'], 'innerHTML')
+
+    def test_project_create_error_returns_to_project_modal(self):
+        response = self.client.post(
+            reverse('project_create'),
+            {'name': '', 'description': ''},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#project-modal')
+
+    def test_project_update_error_returns_to_project_modal(self):
+        response = self.client.post(
+            reverse('project_update', args=[self.project.id]),
+            {'name': '', 'description': ''},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#project-modal')
+
+    def test_member_create_error_returns_to_member_modal(self):
+        response = self.client.post(
+            reverse('project_member_create', args=[self.project.id]),
+            {'user': '', 'role': ProjectMembership.Role.MEMBER},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#member-modal')
+
+    def test_member_update_error_returns_to_member_modal(self):
+        response = self.client.post(
+            reverse('project_member_update', args=[self.membership.id]),
+            {'role': ''},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#member-modal')
+
+    def test_stage_create_error_returns_to_stage_modal(self):
+        response = self.client.post(
+            reverse('stage_create', args=[self.project.id]),
+            {'name': '', 'order': '', 'deadline': '', 'status': Stage.Status.NOT_STARTED},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#stage-modal')
+
+    def test_stage_update_error_returns_to_stage_modal(self):
+        response = self.client.post(
+            reverse('stage_update', args=[self.stage.id]),
+            {'name': '', 'order': '1', 'deadline': '', 'status': Stage.Status.NOT_STARTED},
+            HTTP_HX_REQUEST='true',
+        )
+        self.assert_modal_error(response, '#stage-modal')

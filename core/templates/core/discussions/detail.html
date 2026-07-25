@@ -18,7 +18,11 @@
       </div>
     </header>
 
-    <div id="message-list" class="chat__messages scroll-area">
+    <div id="message-list" class="chat__messages scroll-area"
+         hx-get="{% url 'discussion_messages_poll' discussion.id %}"
+         hx-trigger="every 4s"
+         hx-swap="beforeend"
+         hx-vals="js:{after: (document.getElementById('message-list').lastElementChild ? document.getElementById('message-list').lastElementChild.dataset.messageId : 0) || 0}">
       {% for message in messages %}
         {% include "core/discussions/message.html" %}
       {% empty %}
@@ -30,13 +34,25 @@
       <form hx-post="{% url 'message_create' discussion.id %}"
             hx-target="#message-list"
             hx-swap="beforeend"
-            hx-on::after-request="if(event.detail.successful){this.reset(); var e=document.getElementById('no-messages-placeholder'); if(e)e.remove();}">
+            hx-on::after-request="if(event.detail.successful){this.reset();}">
         {% csrf_token %}
         {{ form.text }}
         <button type="submit" class="btn btn-primary">Отправить</button>
       </form>
-      {% if form.text.errors %}<div class="form-error">{{ form.text.errors|join:", " }}</div>{% endif %}
+      <div id="message-error">
+        {% if form.text.errors %}<div class="form-error">{{ form.text.errors|join:", " }}</div>{% endif %}
+      </div>
     </div>
   </div>
 </div>
+<script>
+  (function () {
+    var list = document.getElementById('message-list');
+    if (!list) return;
+    list.addEventListener('htmx:afterSwap', function () {
+      list.scrollTop = list.scrollHeight;
+    });
+    list.scrollTop = list.scrollHeight;
+  })();
+</script>
 {% endblock %}

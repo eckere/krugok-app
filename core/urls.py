@@ -37,4 +37,5 @@ urlpatterns = [
     path('discussions/create/', views.discussion_create, name='discussion_create'),
     path('discussions/<int:discussion_id>/', views.discussion_detail, name='discussion_detail'),
     path('discussions/<int:discussion_id>/messages/create/', views.message_create, name='message_create'),
+    path('discussions/<int:discussion_id>/messages/poll/', views.discussion_messages_poll, name='discussion_messages_poll'),
 ]

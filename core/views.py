@@ -11,8 +11,10 @@ from django.core.exceptions import PermissionDenied
 from django.db import models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -429,12 +431,16 @@ def project_create(request):
             )
             response = render(request, 'core/projects/card.html', {'project': project})
             return _close_modal(response, 'project-modal')
-        return render(
+        response = render(
             request,
             'core/projects/form.html',
             {'form': form},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#project-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(request, 'core/projects/form.html', {'form': ProjectForm()})
 
@@ -453,12 +459,16 @@ def project_update(request, project_id):
                 )
             response = render(request, 'core/projects/card.html', {'project': project})
             return _close_modal(response, 'project-modal')
-        return render(
+        response = render(
             request,
             'core/projects/form.html',
             {'form': form, 'project': project, 'return_to': return_to},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#project-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(
         request,
@@ -509,12 +519,16 @@ def project_member_create(request, project_id):
                 {'project': project, 'membership': membership},
             )
             return _close_modal(response, 'member-modal')
-        return render(
+        response = render(
             request,
             'core/projects/members/form.html',
             {'project': project, 'form': form},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#member-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(
         request,
@@ -548,12 +562,16 @@ def project_member_update(request, membership_id):
                 {'project': project, 'membership': membership},
             )
             return _close_modal(response, 'member-modal')
-        return render(
+        response = render(
             request,
             'core/projects/members/form.html',
             {'project': project, 'membership': membership, 'form': form},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#member-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(
         request,
@@ -613,12 +631,16 @@ def stage_create(request, project_id):
                 {'project': project, 'stage': stage},
             )
             return _close_modal(response, 'stage-modal')
-        return render(
+        response = render(
             request,
             'core/stages/form.html',
             {'form': form, 'project': project},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#stage-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(request, 'core/stages/form.html', {'form': StageForm(), 'project': project})
 
@@ -654,12 +676,16 @@ def stage_update(request, stage_id):
                 {'project': project, 'stage': stage},
             )
             return _close_modal(response, 'stage-modal')
-        return render(
+        response = render(
             request,
             'core/stages/form.html',
             {'form': form},
             status=200 if request.htmx else 422,
         )
+        if request.htmx:
+            response.headers['HX-Retarget'] = '#stage-modal'
+            response.headers['HX-Reswap'] = 'innerHTML'
+        return response
 
     return render(request, 'core/stages/form.html', {'form': StageForm(instance=stage)})
 
@@ -731,17 +757,77 @@ def discussion_detail(request, discussion_id):
 @login_required
 @require_POST
 def message_create(request, discussion_id):
+    """
+    POST /discussions/<id>/messages/create/
+    Форма отправки сообщения целится (hx-target/hx-swap на самом <form>)
+    в #message-list с hx-swap="beforeend" — это верно для УСПЕШНОЙ отправки
+    (новое сообщение добавляется в конец истории). Но раньше при ОШИБКЕ
+    валидации view делала redirect() на discussion_detail — а htmx сам
+    следует за редиректом и получившийся ответ (целая HTML-страница)
+    вставляет через тот же beforeend в #message-list, то есть в чат
+    буквально влетала вложенная HTML-страница целиком.
+
+    Исправление: ошибка не идёт в основной таргет вообще. Вместо этого
+    отдельным OOB-блоком (hx-swap-oob) обновляется #message-error — блок
+    рядом с полем ввода, который для этого и существует в detail.html.
+    Основное тело ответа при ошибке оставляем пустым, поэтому beforeend
+    в #message-list ничего не добавляет.
+    """
     discussion = get_discussion_or_403(discussion_id, request.user)
     form = MessageForm(request.POST)
+
     if form.is_valid():
         message = form.save(commit=False)
         message.discussion = discussion
         message.sender = request.user
         message.save()
-        return render(request, 'core/discussions/message.html', {'message': message})
+        html = render_to_string(
+            'core/discussions/message.html', {'message': message}, request=request
+        )
+        # Плейсхолдер удаляем тем же OOB-механизмом, чтобы это одинаково
+        # работало при собственной отправке и при получении через polling.
+        html += '<div id="no-messages-placeholder" hx-swap-oob="delete"></div>'
+        # На успехе очищаем предыдущую ошибку, если она была.
+        html += '<div id="message-error" hx-swap-oob="true"></div>'
+        return HttpResponse(html)
 
-    # In case of an error, we can't just render the form, because the detail view needs more context
-    # A full page reload or a more complex HTMX error handling would be better.
-    # For now, let's redirect, though it's not ideal for HTMX.
-    # A better solution for real-world scenarios might be to return a 422 with an error message in the header.
-    return redirect('discussion_detail', discussion_id=discussion_id)
+    error_text = escape(
+        ' '.join(form.errors.get('text', ['Не удалось отправить сообщение.']))
+    )
+    html = (
+        '<div id="message-error" hx-swap-oob="true">'
+        f'<div class="form-error">{error_text}</div>'
+        '</div>'
+    )
+    return HttpResponse(html)
+
+
+@login_required
+def discussion_messages_poll(request, discussion_id):
+    """
+    GET /discussions/<id>/messages/poll/?after=<id последнего сообщения в DOM>
+    Возвращает только новые сообщения, чтобы не дублировать историю и не
+    сбрасывать позицию прокрутки чата.
+    """
+    discussion = get_discussion_or_403(discussion_id, request.user)
+
+    try:
+        after_id = int(request.GET.get('after') or 0)
+    except (TypeError, ValueError):
+        after_id = 0
+
+    new_messages = (
+        discussion.messages.select_related('sender')
+        .filter(id__gt=after_id)
+        .order_by('id')
+    )
+
+    html = ''.join(
+        render_to_string(
+            'core/discussions/message.html', {'message': message}, request=request
+        )
+        for message in new_messages
+    )
+    if new_messages:
+        html += '<div id="no-messages-placeholder" hx-swap-oob="delete"></div>'
+    return HttpResponse(html)

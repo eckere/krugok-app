@@ -1,7 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.http import HttpRequest
 
-from .models import Project, ProjectMembership, Task, TelegramUser
+from .models import Notification, Project, ProjectMembership, Task, TelegramUser
 
 
 @admin.register(TelegramUser)
@@ -36,3 +37,41 @@ class ProjectMembershipAdmin(admin.ModelAdmin):
     list_filter = ('role', 'created_at')
     search_fields = ('project__name', 'user__username')
     readonly_fields = ('created_at',)
+
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ('task', 'recipient', 'kind', 'status', 'created_at')
+    list_filter = ('kind', 'status', 'created_at')
+    search_fields = (
+        'task__title',
+        'recipient__username',
+        'recipient__first_name',
+        'recipient__last_name',
+    )
+    readonly_fields = (
+        'task',
+        'recipient',
+        'kind',
+        'status',
+        'error_message',
+        'created_at',
+        'sent_at',
+    )
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(
+        self,
+        request: HttpRequest,
+        obj: Notification | None = None,
+    ) -> bool:
+        return False
+
+    def has_delete_permission(
+        self,
+        request: HttpRequest,
+        obj: Notification | None = None,
+    ) -> bool:
+        return False

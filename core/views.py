@@ -28,7 +28,17 @@ from .forms import (
     StageForm,
     TaskForm,
 )
-from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser, Discussion, Message
+from .models import (
+    Comment,
+    Discussion,
+    Message,
+    Notification,
+    Project,
+    ProjectMembership,
+    Stage,
+    Task,
+    TelegramUser,
+)
 from .permissions import (
     get_accessible_projects,
     get_accessible_tasks,
@@ -38,6 +48,7 @@ from .permissions import (
     get_task_or_403,
 )
 from .telegram_auth import InitDataValidationError, validate_init_data
+from .telegram_notifications import notify
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +220,8 @@ def task_create(request):
             task = form.save(commit=False)
             task.creator = request.user
             task.save()
+            if task.deadline:
+                notify(task, Notification.Kind.DEADLINE_SET)
             response = render(
                 request,
                 'core/tasks/card.html',
@@ -263,12 +276,36 @@ def task_update(request, task_id):
                                 append в конец списка — иначе получим дубль)
     """
     task = get_task_or_403(task_id, request.user, permission='edit')
+    old_deadline = task.deadline
+    old_status = task.status
     return_to = request.POST.get('return_to') or request.GET.get('return_to')
 
     if request.method == 'POST':
         form = TaskForm(request.POST, instance=task, user=request.user)
         if form.is_valid():
-            form.save()
+            task = form.save()
+            deadline_changed = old_deadline != task.deadline
+            completed = (
+                old_status != Task.Status.DONE
+                and task.status == Task.Status.DONE
+            )
+            if deadline_changed:
+                task.notifications.filter(
+                    kind__in=[
+                        Notification.Kind.DEADLINE_SET,
+                        Notification.Kind.DEADLINE_APPROACHING,
+                        Notification.Kind.DEADLINE_OVERDUE,
+                    ]
+                ).delete()
+            elif completed:
+                task.notifications.filter(
+                    kind__in=[
+                        Notification.Kind.DEADLINE_APPROACHING,
+                        Notification.Kind.DEADLINE_OVERDUE,
+                    ]
+                ).delete()
+            if deadline_changed and task.deadline:
+                notify(task, Notification.Kind.DEADLINE_SET)
             if return_to == 'project':
                 redirect_url = (
                     reverse('project_detail', args=[task.project_id])
@@ -329,6 +366,13 @@ def task_status(request, task_id):
     order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
     task.status = order[(order.index(task.status) + 1) % len(order)]
     task.save()
+    if task.status == Task.Status.DONE:
+        task.notifications.filter(
+            kind__in=[
+                Notification.Kind.DEADLINE_APPROACHING,
+                Notification.Kind.DEADLINE_OVERDUE,
+            ]
+        ).delete()
     return render(
         request,
         'core/tasks/card.html',

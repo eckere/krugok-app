@@ -1,13 +1,27 @@
 import json
+from datetime import timedelta
+from io import StringIO
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
-from .models import Comment, Project, ProjectMembership, Stage, Task, Discussion, Message
+from .models import (
+    Comment,
+    Discussion,
+    Message,
+    Notification,
+    Project,
+    ProjectMembership,
+    Stage,
+    Task,
+)
 from .telegram_auth import InitDataValidationError
+from .telegram_notifications import notify
 
 
 class TelegramAuthenticationTests(TestCase):
@@ -1208,3 +1222,270 @@ class HtmxModalErrorRetargetTests(TestCase):
             HTTP_HX_REQUEST='true',
         )
         self.assert_modal_error(response, '#stage-modal')
+
+
+class NotificationTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='notification_user',
+            telegram_id=987654321,
+            first_name='Ирина',
+        )
+        self.client.force_login(self.user)
+
+    def deadline_input(self, value):
+        return timezone.localtime(value).strftime('%Y-%m-%dT%H:%M')
+
+    def task_form_data(self, *, title, deadline, status=Task.Status.NEW):
+        return {
+            'title': title,
+            'description': '',
+            'project': '',
+            'stage': '',
+            'assignee': self.user.id,
+            'deadline': self.deadline_input(deadline),
+            'status': status,
+        }
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_task_create_with_deadline_sends_notification(self, send_message):
+        send_message.return_value = (True, '')
+        deadline = (timezone.now() + timedelta(days=2)).replace(
+            second=0,
+            microsecond=0,
+        )
+
+        response = self.client.post(
+            reverse('task_create'),
+            self.task_form_data(
+                title='Задача с дедлайном',
+                deadline=deadline,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task = Task.objects.get(title='Задача с дедлайном')
+        notification = task.notifications.get(
+            kind=Notification.Kind.DEADLINE_SET
+        )
+        self.assertEqual(notification.status, Notification.Status.SENT)
+        self.assertIsNotNone(notification.sent_at)
+        send_message.assert_called_once()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_task_create_survives_notification_failure(self, send_message):
+        send_message.return_value = (
+            False,
+            "Forbidden: bot can't initiate conversation with a user",
+        )
+        deadline = (timezone.now() + timedelta(days=2)).replace(
+            second=0,
+            microsecond=0,
+        )
+
+        response = self.client.post(
+            reverse('task_create'),
+            self.task_form_data(
+                title='Задача с ошибкой отправки',
+                deadline=deadline,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        task = Task.objects.get(title='Задача с ошибкой отправки')
+        notification = task.notifications.get(
+            kind=Notification.Kind.DEADLINE_SET
+        )
+        self.assertEqual(notification.status, Notification.Status.FAILED)
+        self.assertIn("can't initiate", notification.error_message)
+        self.assertIsNone(notification.sent_at)
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_task_update_with_changed_deadline_resets_notifications(
+        self,
+        send_message,
+    ):
+        send_message.return_value = (True, '')
+        old_deadline = (timezone.now() + timedelta(days=2)).replace(
+            second=0,
+            microsecond=0,
+        )
+        new_deadline = old_deadline + timedelta(days=1)
+        task = Task.objects.create(
+            title='Изменяемая задача',
+            creator=self.user,
+            assignee=self.user,
+            deadline=old_deadline,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_SET,
+            status=Notification.Status.SENT,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_APPROACHING,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_OVERDUE,
+        )
+
+        response = self.client.post(
+            reverse('task_update', args=[task.id]),
+            self.task_form_data(
+                title=task.title,
+                deadline=new_deadline,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            task.notifications.filter(
+                kind=Notification.Kind.DEADLINE_APPROACHING
+            ).exists()
+        )
+        self.assertFalse(
+            task.notifications.filter(
+                kind=Notification.Kind.DEADLINE_OVERDUE
+            ).exists()
+        )
+        deadline_notifications = task.notifications.filter(
+            kind=Notification.Kind.DEADLINE_SET
+        )
+        self.assertEqual(deadline_notifications.count(), 1)
+        self.assertEqual(
+            deadline_notifications.get().status,
+            Notification.Status.SENT,
+        )
+        send_message.assert_called_once()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_task_update_without_deadline_change_does_not_notify_again(
+        self,
+        send_message,
+    ):
+        deadline = (timezone.now() + timedelta(days=2)).replace(
+            second=0,
+            microsecond=0,
+        )
+        task = Task.objects.create(
+            title='Неизменяемый дедлайн',
+            creator=self.user,
+            assignee=self.user,
+            deadline=deadline,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_SET,
+            status=Notification.Status.SENT,
+        )
+
+        response = self.client.post(
+            reverse('task_update', args=[task.id]),
+            self.task_form_data(
+                title='Новое название',
+                deadline=deadline,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            task.notifications.filter(
+                kind=Notification.Kind.DEADLINE_SET
+            ).count(),
+            1,
+        )
+        send_message.assert_not_called()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_check_deadlines_creates_one_overdue_notification(
+        self,
+        send_message,
+    ):
+        send_message.return_value = (True, '')
+        task = Task.objects.create(
+            title='Просроченная задача',
+            creator=self.user,
+            assignee=self.user,
+            deadline=timezone.now() - timedelta(minutes=1),
+        )
+
+        call_command('check_deadlines', stdout=StringIO())
+        call_command('check_deadlines', stdout=StringIO())
+
+        self.assertEqual(
+            task.notifications.filter(
+                kind=Notification.Kind.DEADLINE_OVERDUE
+            ).count(),
+            1,
+        )
+        send_message.assert_called_once()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_check_deadlines_notifies_only_approaching_task(
+        self,
+        send_message,
+    ):
+        send_message.return_value = (True, '')
+        approaching = Task.objects.create(
+            title='Скорый дедлайн',
+            creator=self.user,
+            assignee=self.user,
+            deadline=timezone.now() + timedelta(hours=12),
+        )
+        distant = Task.objects.create(
+            title='Дальний дедлайн',
+            creator=self.user,
+            assignee=self.user,
+            deadline=timezone.now() + timedelta(days=3),
+        )
+
+        call_command('check_deadlines', stdout=StringIO())
+
+        self.assertTrue(
+            approaching.notifications.filter(
+                kind=Notification.Kind.DEADLINE_APPROACHING
+            ).exists()
+        )
+        self.assertFalse(distant.notifications.exists())
+        send_message.assert_called_once()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_check_deadlines_skips_completed_task(self, send_message):
+        task = Task.objects.create(
+            title='Готовая задача',
+            creator=self.user,
+            assignee=self.user,
+            deadline=timezone.now() - timedelta(days=1),
+            status=Task.Status.DONE,
+        )
+
+        call_command('check_deadlines', stdout=StringIO())
+
+        self.assertFalse(task.notifications.exists())
+        send_message.assert_not_called()
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_notify_falls_back_to_creator(self, send_message):
+        send_message.return_value = (True, '')
+        task = Task.objects.create(
+            title='Задача без исполнителя',
+            creator=self.user,
+            deadline=timezone.now() + timedelta(hours=12),
+        )
+
+        notification = notify(
+            task,
+            Notification.Kind.DEADLINE_APPROACHING,
+        )
+
+        self.assertEqual(notification.recipient, self.user)
+        self.assertEqual(
+            send_message.call_args.args[0],
+            self.user.telegram_id,
+        )

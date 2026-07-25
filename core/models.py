@@ -221,6 +221,45 @@ class Task(models.Model):
         )
 
 
+class Notification(models.Model):
+    class Kind(models.TextChoices):
+        DEADLINE_SET = 'deadline_set', 'Дедлайн установлен'
+        DEADLINE_APPROACHING = 'deadline_approaching', 'Дедлайн приближается'
+        DEADLINE_OVERDUE = 'deadline_overdue', 'Дедлайн просрочен'
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Ожидает отправки'
+        SENT = 'sent', 'Отправлено'
+        FAILED = 'failed', 'Ошибка отправки'
+
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='notifications',
+    )
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('task', 'kind')
+        ordering = ['-created_at']
+
+    def __str__(self) -> str:
+        return f'{self.get_kind_display()}: {self.task}'
+
+
 class Comment(models.Model):
     task = models.ForeignKey(
         Task,

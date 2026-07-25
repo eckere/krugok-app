@@ -51,7 +51,9 @@ class Project(models.Model):
 
     def get_members(self):
         return TelegramUser.objects.filter(
-            models.Q(project_memberships__project=self) | models.Q(projects=self)
+            models.Q(pk=self.owner_id)
+            | models.Q(project_memberships__project=self)
+            | models.Q(projects=self)
         ).distinct()
 
     def is_member(self, user):

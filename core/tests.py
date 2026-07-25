@@ -210,6 +210,231 @@ class PermissionTests(TestCase):
         self.assertIn(response.status_code, (403, 404))
 
 
+class AccessControlRegressionTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.owner = user_model.objects.create_user(username='access_owner')
+        self.admin = user_model.objects.create_user(username='access_admin')
+        self.member = user_model.objects.create_user(username='access_member')
+        self.outsider = user_model.objects.create_user(username='access_outsider')
+
+        self.project = Project.objects.create(name='Visible project', owner=self.owner)
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.owner,
+            role=ProjectMembership.Role.OWNER,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.admin,
+            role=ProjectMembership.Role.ADMIN,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.member,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.stage = Stage.objects.create(project=self.project, name='Protected stage', order=1)
+        self.project_task = Task.objects.create(
+            title='Visible project task',
+            project=self.project,
+            stage=self.stage,
+            creator=self.owner,
+            assignee=self.member,
+        )
+
+        self.foreign_project = Project.objects.create(
+            name='Foreign project',
+            owner=self.outsider,
+        )
+        ProjectMembership.objects.create(
+            project=self.foreign_project,
+            user=self.outsider,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.foreign_task = Task.objects.create(
+            title='Foreign task',
+            project=self.foreign_project,
+            creator=self.outsider,
+        )
+
+    def test_lists_and_home_hide_inaccessible_objects(self):
+        self.client.force_login(self.member)
+
+        for url_name in ('index', 'task_list', 'project_list'):
+            response = self.client.get(reverse(url_name))
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, 'Foreign project')
+            self.assertNotContains(response, 'Foreign task')
+
+        self.assertContains(self.client.get(reverse('task_list')), self.project_task.title)
+        self.assertContains(self.client.get(reverse('project_list')), self.project.name)
+
+    def test_standalone_task_is_visible_only_to_creator_and_assignee(self):
+        standalone = Task.objects.create(
+            title='Standalone private',
+            creator=self.owner,
+            assignee=self.member,
+        )
+
+        self.client.force_login(self.outsider)
+        response = self.client.get(reverse('task_detail', args=[standalone.id]))
+        self.assertEqual(response.status_code, 403)
+
+        self.client.force_login(self.member)
+        response = self.client.get(reverse('task_detail', args=[standalone.id]))
+        self.assertEqual(response.status_code, 200)
+
+    def test_standalone_assignee_can_change_status_but_cannot_edit_or_delete(self):
+        standalone = Task.objects.create(
+            title='Assigned standalone',
+            creator=self.owner,
+            assignee=self.member,
+        )
+        self.client.force_login(self.member)
+
+        status_response = self.client.post(reverse('task_status', args=[standalone.id]))
+        edit_response = self.client.get(reverse('task_update', args=[standalone.id]))
+        delete_response = self.client.delete(reverse('task_delete', args=[standalone.id]))
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(edit_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+
+    def test_member_cannot_mutate_project_or_stages(self):
+        self.client.force_login(self.member)
+
+        self.assertEqual(
+            self.client.get(reverse('project_update', args=[self.project.id])).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(reverse('project_archive', args=[self.project.id])).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                reverse('stage_create', args=[self.project.id]),
+                {'name': 'Forbidden', 'order': '2', 'status': Stage.Status.NOT_STARTED},
+            ).status_code,
+            403,
+        )
+
+    def test_admin_can_update_project_but_cannot_delete_it(self):
+        self.client.force_login(self.admin)
+        response = self.client.post(
+            reverse('project_update', args=[self.project.id]),
+            {'name': 'Updated by admin', 'description': 'Allowed'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Updated by admin')
+        self.assertEqual(
+            self.client.delete(reverse('project_delete', args=[self.project.id])).status_code,
+            403,
+        )
+
+    def test_project_update_changes_existing_row_instead_of_creating_copy(self):
+        self.client.force_login(self.owner)
+        project_count = Project.objects.count()
+
+        form_response = self.client.get(reverse('project_update', args=[self.project.id]))
+        update_response = self.client.post(
+            reverse('project_update', args=[self.project.id]),
+            {'name': 'Renamed project', 'description': 'Changed'},
+        )
+
+        self.assertContains(form_response, reverse('project_update', args=[self.project.id]))
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(Project.objects.count(), project_count)
+        self.project.refresh_from_db()
+        self.assertEqual(self.project.name, 'Renamed project')
+
+    def test_task_form_rejects_inaccessible_project(self):
+        self.client.force_login(self.member)
+        response = self.client.post(
+            reverse('task_create'),
+            {
+                'title': 'Injected task',
+                'description': '',
+                'project': self.foreign_project.id,
+                'stage': '',
+                'assignee': '',
+                'deadline': '',
+                'status': Task.Status.NEW,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Task.objects.filter(title='Injected task').exists())
+        self.assertFormError(response.context['form'], 'project', 'Выберите корректный вариант. Вашего варианта нет среди допустимых значений.')
+
+    def test_task_form_rejects_assignee_outside_project(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse('task_create'),
+            {
+                'title': 'Invalid assignee',
+                'description': '',
+                'project': self.project.id,
+                'stage': self.stage.id,
+                'assignee': self.outsider.id,
+                'deadline': '',
+                'status': Task.Status.NEW,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Task.objects.filter(title='Invalid assignee').exists())
+        self.assertTrue(response.context['form'].errors.get('assignee'))
+
+    def test_discussion_form_rejects_inaccessible_task(self):
+        self.client.force_login(self.member)
+        response = self.client.post(
+            reverse('discussion_create'),
+            {
+                'title': 'Leaked discussion',
+                'task': self.foreign_task.id,
+                'participants': [self.owner.id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Discussion.objects.filter(title='Leaked discussion').exists())
+        self.assertTrue(response.context['form'].errors.get('task'))
+
+    def test_task_discussion_rejects_participant_outside_project(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse('discussion_create'),
+            {
+                'title': 'Invalid participant',
+                'task': self.project_task.id,
+                'participants': [self.outsider.id],
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(Discussion.objects.filter(title='Invalid participant').exists())
+        self.assertTrue(response.context['form'].errors.get('participants'))
+
+    def test_standalone_task_discussion_grants_participant_read_access(self):
+        standalone = Task.objects.create(title='Discussed standalone', creator=self.owner)
+        discussion = Discussion.objects.create(
+            title='Standalone discussion',
+            task=standalone,
+            created_by=self.owner,
+        )
+        discussion.participants.add(self.member)
+        self.client.force_login(self.member)
+
+        response = self.client.get(reverse('task_detail', args=[standalone.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, standalone.title)
+
+
 class TaskDetailAndCommentsTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(username='commenter', password='pass')

@@ -1,6 +1,7 @@
 from django import forms
 
 from .models import Comment, Project, Stage, Task, Discussion, Message, TelegramUser
+from .permissions import get_accessible_projects, get_accessible_tasks
 
 
 class DiscussionForm(forms.ModelForm):
@@ -20,10 +21,31 @@ class DiscussionForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
-        user = kwargs.pop('user', None)
+        self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        if user:
-            self.fields['participants'].queryset = TelegramUser.objects.exclude(pk=user.pk)
+        if self.user:
+            self.fields['participants'].queryset = TelegramUser.objects.filter(
+                is_active=True
+            ).exclude(pk=self.user.pk)
+            self.fields['task'].queryset = get_accessible_tasks(self.user)
+
+    def clean(self):
+        cleaned_data = super().clean()
+        task = cleaned_data.get('task')
+        participants = cleaned_data.get('participants')
+        if task and task.project_id and participants:
+            allowed_ids = set(task.project.get_members().values_list('id', flat=True))
+            invalid_participants = [
+                participant
+                for participant in participants
+                if participant.id not in allowed_ids
+            ]
+            if invalid_participants:
+                self.add_error(
+                    'participants',
+                    'В обсуждение задачи можно добавить только участников её проекта.',
+                )
+        return cleaned_data
 
 
 class MessageForm(forms.ModelForm):
@@ -55,6 +77,48 @@ class TaskForm(forms.ModelForm):
             'assignee': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
             'status': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if not self.user:
+            return
+
+        projects = get_accessible_projects(self.user)
+        self.fields['project'].queryset = projects
+
+        project_id = None
+        if self.is_bound:
+            project_id = self.data.get(self.add_prefix('project'))
+        elif self.instance.pk:
+            project_id = self.instance.project_id
+
+        stages = Stage.objects.filter(
+            project__in=projects,
+            project__is_archived=False,
+            is_archived=False,
+        )
+        assignees = TelegramUser.objects.filter(is_active=True)
+        if project_id:
+            try:
+                project = projects.get(pk=project_id)
+            except (Project.DoesNotExist, TypeError, ValueError):
+                stages = Stage.objects.none()
+                assignees = TelegramUser.objects.none()
+            else:
+                stages = stages.filter(project=project)
+                assignees = project.get_members().filter(is_active=True)
+
+        self.fields['stage'].queryset = stages
+        self.fields['assignee'].queryset = assignees
+
+    def clean(self):
+        cleaned_data = super().clean()
+        project = cleaned_data.get('project')
+        assignee = cleaned_data.get('assignee')
+        if project and assignee and not project.is_member(assignee):
+            self.add_error('assignee', 'Исполнитель должен быть участником выбранного проекта.')
+        return cleaned_data
 
 
 class ProjectForm(forms.ModelForm):

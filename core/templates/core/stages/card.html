@@ -1,3 +1,4 @@
+{% load core_permissions %}
 <div id="stage-{{ stage.id }}" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
@@ -10,10 +11,12 @@
         {% if stage.deadline %}<span>Дедлайн: {{ stage.deadline|date:'d.m.Y' }}</span>{% endif %}
       </div>
     </div>
+    {% if project|can_admin_project:user %}
     <div class="flex flex-wrap gap-2">
       <button type="button" hx-get="{% url 'stage_update' stage.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Ред.</button>
       <button type="button" hx-post="{% url 'stage_archive' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Архивировать этап «{{ stage.name }}»?" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Архив</button>
       <button type="button" hx-delete="{% url 'stage_delete' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Удалить этап «{{ stage.name }}»?" class="rounded-md border border-red-200 px-2 py-1 text-sm text-red-600">Удалить</button>
     </div>
+    {% endif %}
   </div>
 </div>

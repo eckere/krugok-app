@@ -11,6 +11,15 @@
     </div>
 
     <div id="project-modal"></div>
+
+    <div class="flex gap-2">
+      <a href="{% url 'project_list' %}?filter=all" hx-get="{% url 'project_list' %}?filter=all" hx-target="#project-list" hx-swap="outerHTML" class="rounded-full border px-3 py-1 text-sm {% if filter == 'all' %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}">
+        Все
+      </a>
+      <a href="{% url 'project_list' %}?filter=mine" hx-get="{% url 'project_list' %}?filter=mine" hx-target="#project-list" hx-swap="outerHTML" class="rounded-full border px-3 py-1 text-sm {% if filter == 'mine' %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}">
+        Мои
+      </a>
+    </div>
 {% endif %}
 
     <div id="project-list" class="space-y-3">

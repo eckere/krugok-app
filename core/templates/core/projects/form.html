@@ -1,11 +1,18 @@
 <div id="project-form" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
   <div class="mb-3 flex items-center justify-between">
-    <h3 class="text-lg font-semibold text-gray-900">Новый проект</h3>
+    <h3 class="text-lg font-semibold text-gray-900">{% if form.instance.pk %}Редактировать проект{% else %}Новый проект{% endif %}</h3>
     <button type="button" onclick="document.getElementById('project-modal').innerHTML=''" class="text-sm text-gray-500">Закрыть</button>
   </div>
 
-  <form method="post" hx-post="{% url 'project_create' %}" hx-target="#project-list" hx-swap="beforeend">
+  <form method="post"
+        hx-post="{% if form.instance.pk %}{% url 'project_update' form.instance.pk %}{% else %}{% url 'project_create' %}{% endif %}"
+        {% if form.instance.pk %}
+          hx-target="#project-{{ form.instance.pk }}" hx-swap="outerHTML"
+        {% else %}
+          hx-target="#project-list" hx-swap="beforeend"
+        {% endif %}>
     {% csrf_token %}
+    {% if return_to %}<input type="hidden" name="return_to" value="{{ return_to }}">{% endif %}
     <div class="space-y-3">
       {% for field in form %}
         <div>

@@ -7,16 +7,23 @@ import logging
 from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.db import models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from .forms import CommentForm, ProjectForm, StageForm, TaskForm, DiscussionForm, MessageForm
 from .models import Comment, Project, ProjectMembership, Stage, Task, TelegramUser, Discussion, Message
-from .permissions import get_project_or_403, get_stage_or_403, get_task_or_403, get_discussion_or_403
+from .permissions import (
+    get_accessible_projects,
+    get_accessible_tasks,
+    get_discussion_or_403,
+    get_project_or_403,
+    get_stage_or_403,
+    get_task_or_403,
+)
 from .telegram_auth import InitDataValidationError, validate_init_data
 
 logger = logging.getLogger(__name__)
@@ -28,9 +35,11 @@ logger = logging.getLogger(__name__)
 def index(request):
     context = {}
     if request.user.is_authenticated:
-        context['tasks'] = Task.objects.select_related('project', 'assignee').order_by('status', 'deadline')
+        context['tasks'] = get_accessible_tasks(request.user).select_related(
+            'project', 'assignee'
+        ).order_by('status', 'deadline')
         context['filter'] = 'all'
-        context['projects'] = Project.objects.filter(is_archived=False).order_by('-created_at')
+        context['projects'] = get_accessible_projects(request.user).order_by('-created_at')
     return render(request, 'core/index.html', context)
 
 
@@ -97,7 +106,9 @@ def task_list(request):
     outerHTML-подмена находит новый #task-list в ответе и всё продолжает работать.
     """
     filter_value = request.GET.get('filter', 'all')
-    tasks = Task.objects.select_related('project', 'assignee').order_by('status', 'deadline')
+    tasks = get_accessible_tasks(request.user).select_related(
+        'project', 'assignee'
+    ).order_by('status', 'deadline')
     if filter_value == 'mine':
         tasks = tasks.filter(assignee=request.user)
 
@@ -123,15 +134,20 @@ def task_create(request):
                             ошибка -> форма с ошибками (перерисовывается в модалке)
     """
     if request.method == 'POST':
-        form = TaskForm(request.POST)
+        form = TaskForm(request.POST, user=request.user)
         if form.is_valid():
             task = form.save(commit=False)
             task.creator = request.user
             task.save()
             return render(request, 'core/tasks/card.html', {'task': task})
-        return render(request, 'core/tasks/form.html', {'form': form}, status=422)
+        return render(
+            request,
+            'core/tasks/form.html',
+            {'form': form},
+            status=200 if request.htmx else 422,
+        )
 
-    return render(request, 'core/tasks/form.html', {'form': TaskForm()})
+    return render(request, 'core/tasks/form.html', {'form': TaskForm(user=request.user)})
 
 
 @login_required
@@ -142,16 +158,25 @@ def task_update(request, task_id):
                                 ЭТОЙ ЖЕ задачи (outerHTML-замена по id, а не
                                 append в конец списка — иначе получим дубль)
     """
-    task = get_task_or_403(task_id, request.user)
+    task = get_task_or_403(task_id, request.user, permission='edit')
 
     if request.method == 'POST':
-        form = TaskForm(request.POST, instance=task)
+        form = TaskForm(request.POST, instance=task, user=request.user)
         if form.is_valid():
             form.save()
             return render(request, 'core/tasks/card.html', {'task': task})
-        return render(request, 'core/tasks/form.html', {'form': form}, status=422)
+        return render(
+            request,
+            'core/tasks/form.html',
+            {'form': form},
+            status=200 if request.htmx else 422,
+        )
 
-    return render(request, 'core/tasks/form.html', {'form': TaskForm(instance=task)})
+    return render(
+        request,
+        'core/tasks/form.html',
+        {'form': TaskForm(instance=task, user=request.user)},
+    )
 
 
 @login_required
@@ -164,7 +189,7 @@ def task_delete(request, task_id):
     ответа буквально на место карточки; JsonResponse({}) оставил бы
     в DOM текст "{}" вместо того, чтобы карточка просто исчезла.
     """
-    task = get_task_or_403(task_id, request.user)
+    task = get_task_or_403(task_id, request.user, permission='delete')
     task.delete()
     return HttpResponse(status=200)
 
@@ -178,7 +203,7 @@ def task_status(request, task_id):
     поэтому статус просто циклически переключается: новая -> в процессе ->
     выполнена -> снова новая. Возвращает обновлённую карточку для outerHTML.
     """
-    task = get_task_or_403(task_id, request.user)
+    task = get_task_or_403(task_id, request.user, permission='status')
     order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
     task.status = order[(order.index(task.status) + 1) % len(order)]
     task.save()
@@ -212,8 +237,17 @@ def comment_create(request, task_id):
 @login_required
 def project_list(request):
     """GET /projects/ — список активных (не архивных) проектов."""
-    projects = Project.objects.filter(is_archived=False).order_by('-created_at')
-    return render(request, 'core/projects/list.html', {'projects': projects})
+    filter_value = request.GET.get('filter', 'all')
+    projects = get_accessible_projects(request.user).order_by('-created_at')
+    if filter_value == 'mine':
+        projects = projects.filter(
+            models.Q(owner=request.user)
+            | models.Q(
+                project_memberships__user=request.user,
+                project_memberships__role=ProjectMembership.Role.OWNER,
+            )
+        ).distinct()
+    return render(request, 'core/projects/list.html', {'projects': projects, 'filter': filter_value})
 
 
 @login_required
@@ -244,9 +278,49 @@ def project_create(request):
                 role=ProjectMembership.Role.OWNER,
             )
             return render(request, 'core/projects/card.html', {'project': project})
-        return render(request, 'core/projects/form.html', {'form': form}, status=422)
+        return render(
+            request,
+            'core/projects/form.html',
+            {'form': form},
+            status=200 if request.htmx else 422,
+        )
 
     return render(request, 'core/projects/form.html', {'form': ProjectForm()})
+
+
+@login_required
+def project_update(request, project_id):
+    project = get_project_or_403(project_id, request.user, required_role='admin')
+    return_to = request.POST.get('return_to') or request.GET.get('return_to')
+    if request.method == 'POST':
+        form = ProjectForm(request.POST, instance=project)
+        if form.is_valid():
+            form.save()
+            if return_to == 'detail':
+                return HttpResponse(
+                    headers={'HX-Redirect': reverse('project_detail', args=[project.id])}
+                )
+            return render(request, 'core/projects/card.html', {'project': project})
+        return render(
+            request,
+            'core/projects/form.html',
+            {'form': form, 'project': project, 'return_to': return_to},
+            status=200 if request.htmx else 422,
+        )
+
+    return render(
+        request,
+        'core/projects/form.html',
+        {'form': ProjectForm(instance=project), 'project': project, 'return_to': return_to},
+    )
+
+
+@login_required
+@require_http_methods(['DELETE'])
+def project_delete(request, project_id):
+    project = get_project_or_403(project_id, request.user, required_role='owner')
+    project.delete()
+    return HttpResponse(status=200)
 
 
 @login_required
@@ -259,9 +333,11 @@ def project_archive(request, project_id):
     группировку молча). Пустое тело ответа -> hx-swap=outerHTML убирает
     карточку из списка активных проектов.
     """
-    project = get_project_or_403(project_id, request.user)
+    project = get_project_or_403(project_id, request.user, required_role='admin')
     project.is_archived = True
     project.save()
+    if request.POST.get('return_to') == 'projects':
+        return HttpResponse(headers={'HX-Redirect': reverse('project_list')})
     return HttpResponse(status=200)
 
 
@@ -275,7 +351,7 @@ def _normalize_stage_order(project):
 
 @login_required
 def stage_create(request, project_id):
-    project = get_project_or_403(project_id, request.user)
+    project = get_project_or_403(project_id, request.user, required_role='admin')
     if request.method == 'POST':
         form = StageForm(request.POST)
         if form.is_valid():
@@ -289,14 +365,19 @@ def stage_create(request, project_id):
             stage.save()
             _normalize_stage_order(project)
             return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
-        return render(request, 'core/stages/form.html', {'form': form, 'project': project}, status=422)
+        return render(
+            request,
+            'core/stages/form.html',
+            {'form': form, 'project': project},
+            status=200 if request.htmx else 422,
+        )
 
     return render(request, 'core/stages/form.html', {'form': StageForm(), 'project': project})
 
 
 @login_required
 def stage_update(request, stage_id):
-    stage = get_stage_or_403(stage_id, request.user)
+    stage = get_stage_or_403(stage_id, request.user, required_role='admin')
     project = stage.project
     old_order = stage.order
 
@@ -320,7 +401,12 @@ def stage_update(request, stage_id):
             stage.save()
             _normalize_stage_order(project)
             return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
-        return render(request, 'core/stages/form.html', {'form': form}, status=422)
+        return render(
+            request,
+            'core/stages/form.html',
+            {'form': form},
+            status=200 if request.htmx else 422,
+        )
 
     return render(request, 'core/stages/form.html', {'form': StageForm(instance=stage)})
 
@@ -328,7 +414,7 @@ def stage_update(request, stage_id):
 @login_required
 @require_POST
 def stage_archive(request, stage_id):
-    stage = get_stage_or_403(stage_id, request.user)
+    stage = get_stage_or_403(stage_id, request.user, required_role='admin')
     stage.is_archived = True
     stage.save()
     _normalize_stage_order(stage.project)
@@ -338,7 +424,7 @@ def stage_archive(request, stage_id):
 @login_required
 @require_http_methods(['DELETE'])
 def stage_delete(request, stage_id):
-    stage = get_stage_or_403(stage_id, request.user)
+    stage = get_stage_or_403(stage_id, request.user, required_role='admin')
     project = stage.project
     stage.delete()
     _normalize_stage_order(project)

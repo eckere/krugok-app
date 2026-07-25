@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load core_permissions %}
 
 {% block content %}
 <div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
@@ -11,8 +12,21 @@
         {% endif %}
       </div>
       <div class="flex flex-wrap gap-2">
+        {% if project|can_admin_project:user %}
+          <button type="button" hx-get="{% url 'project_update' project.id %}?return_to=detail" hx-target="#project-modal" hx-swap="innerHTML" class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">Редактировать</button>
+          <button type="button"
+                  hx-post="{% url 'project_archive' project.id %}"
+                  hx-vals='{"return_to": "projects"}'
+                  hx-swap="none"
+                  hx-confirm="Архивировать проект «{{ project.name }}»?"
+                  class="shrink-0 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">
+            Архивировать
+          </button>
+        {% endif %}
         <a href="{% url 'project_list' %}" class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">К проектам</a>
-        <button type="button" hx-get="{% url 'stage_create' project.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">+ Этап</button>
+        {% if project|can_admin_project:user %}
+          <button type="button" hx-get="{% url 'stage_create' project.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">+ Этап</button>
+        {% endif %}
       </div>
     </div>
 

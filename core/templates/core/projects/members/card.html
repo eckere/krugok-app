@@ -1,26 +1,27 @@
 {% load core_permissions %}
-<div id="membership-{{ membership.id }}" class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white p-3">
-  <div class="min-w-0">
-    <div class="truncate text-sm font-medium text-gray-900">{{ membership.user.display_name }}</div>
-    <div class="text-xs text-gray-500">{{ membership.get_role_display }}</div>
+<div id="membership-{{ membership.id }}" class="member-row">
+  <div class="member-row__identity">
+    <div class="member-row__avatar">{{ membership.user.first_name|default:membership.user.username|first|upper }}</div>
+    <div class="member-row__copy">
+      <div class="member-row__name">{{ membership.user.display_name }}</div>
+      <div class="member-row__role">{{ membership.get_role_display }}</div>
+    </div>
   </div>
 
   {% if project|can_own_project:user and membership.user_id != project.owner_id %}
-    <div class="flex shrink-0 gap-2">
+    <div class="member-row__actions">
       <button type="button"
               hx-get="{% url 'project_member_update' membership.id %}"
-              hx-target="#member-modal"
-              hx-swap="innerHTML"
-              class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">
+              hx-target="#member-modal" hx-swap="innerHTML"
+              class="btn btn-ghost btn-sm">
         Роль
       </button>
       <button type="button"
               hx-delete="{% url 'project_member_delete' membership.id %}"
-              hx-target="#membership-{{ membership.id }}"
-              hx-swap="outerHTML"
+              hx-target="#membership-{{ membership.id }}" hx-swap="outerHTML"
               hx-confirm="Удалить участника {{ membership.user.display_name }} из проекта?"
-              class="rounded-md border border-red-200 px-2 py-1 text-sm text-red-600">
-        Удалить
+              class="btn btn-danger btn-sm">
+        ×
       </button>
     </div>
   {% endif %}

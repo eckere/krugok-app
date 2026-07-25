@@ -1,47 +1,47 @@
 {% extends "base.html" %}
 
-{% block title %}Создать обсуждение{% endblock title %}
+{% block title %}Новое обсуждение — КружокAPP{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8 max-w-2xl">
-    <h1 class="text-2xl font-bold text-gray-800 mb-6">Создать новое обсуждение</h1>
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <h1 class="page-header__title">Новое обсуждение</h1>
+      <p class="page-header__subtitle">Выберите тему и участников переписки</p>
+    </div>
+  </header>
 
+  <section class="form-card">
     <form method="post" action="{% url 'discussion_create' %}">
-        {% csrf_token %}
-        <div class="space-y-4">
-            <div>
-                <label for="{{ form.title.id_for_label }}" class="block text-sm font-medium text-gray-700">Название</label>
-                {{ form.title }}
-                {% if form.title.errors %}
-                    <p class="text-red-500 text-xs mt-1">{{ form.title.errors|join:", " }}</p>
-                {% endif %}
-            </div>
-
-            <div>
-                <label for="{{ form.task.id_for_label }}" class="block text-sm font-medium text-gray-700">Связать с задачей (опционально)</label>
-                {{ form.task }}
-                {% if form.task.errors %}
-                    <p class="text-red-500 text-xs mt-1">{{ form.task.errors|join:", " }}</p>
-                {% endif %}
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700">Участники</label>
-                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-60 overflow-y-auto p-4 bg-white border border-gray-300 rounded-md">
-                    {{ form.participants }}
-                </div>
-                {% if form.participants.errors %}
-                    <p class="text-red-500 text-xs mt-1">{{ form.participants.errors|join:", " }}</p>
-                {% endif %}
-            </div>
+      {% csrf_token %}
+      <div class="form-grid">
+        <div class="form-field form-field--full">
+          <label for="{{ form.title.id_for_label }}" class="form-label">Название</label>
+          {{ form.title }}
+          {% if form.title.errors %}<div class="form-error">{{ form.title.errors|join:", " }}</div>{% endif %}
         </div>
 
-        <div class="mt-6 flex items-center justify-end gap-x-4">
-            <a href="{% url 'discussion_list' %}" class="text-sm font-semibold leading-6 text-gray-900">Отмена</a>
-            <button type="submit" class="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
-                Создать
-            </button>
+        <div class="form-field form-field--full">
+          <label for="{{ form.task.id_for_label }}" class="form-label">Связать с задачей</label>
+          {{ form.task }}
+          <div class="form-hint">Необязательно. Для задачи будут доступны только участники её проекта.</div>
+          {% if form.task.errors %}<div class="form-error">{{ form.task.errors|join:", " }}</div>{% endif %}
         </div>
+
+        <div class="form-field form-field--full">
+          <label class="form-label">Участники</label>
+          <div class="checkbox-list scroll-area">{{ form.participants }}</div>
+          {% if form.participants.errors %}<div class="form-error">{{ form.participants.errors|join:", " }}</div>{% endif %}
+        </div>
+      </div>
+
+      {% if form.non_field_errors %}<div class="form-error">{{ form.non_field_errors|join:", " }}</div>{% endif %}
+
+      <div class="form-actions">
+        <a href="{% url 'discussion_list' %}" class="btn btn-ghost">Отмена</a>
+        <button type="submit" class="btn btn-primary">Создать обсуждение</button>
+      </div>
     </form>
+  </section>
 </div>
-{% endblock content %}
+{% endblock %}

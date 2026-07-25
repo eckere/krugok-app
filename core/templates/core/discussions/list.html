@@ -1,34 +1,55 @@
 {% extends "base.html" %}
 
-{% block title %}Обсуждения{% endblock title %}
+{% block title %}Обсуждения — КружокAPP{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-800">Обсуждения</h1>
-        <a href="{% url 'discussion_create' %}" class="bg-blue-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-blue-600 transition duration-300">
-            Создать обсуждение
-        </a>
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <h1 class="page-header__title">Обсуждения</h1>
+      <p class="page-header__subtitle">Переписка по задачам и отдельным темам</p>
     </div>
+    <div class="page-header__actions">
+      <a href="{% url 'discussion_create' %}" class="btn btn-primary">+ Новое обсуждение</a>
+    </div>
+  </header>
 
-    <div id="discussion-list" class="space-y-4">
-        {% for discussion in discussions %}
-            <a href="{% url 'discussion_detail' discussion.id %}" class="block bg-white p-4 rounded-lg shadow hover:shadow-md transition-shadow duration-200">
-                <h2 class="font-bold text-lg text-gray-900">{{ discussion.title }}</h2>
-                <p class="text-sm text-gray-600">
-                    Участников: {{ discussion.participants.count }}
-                </p>
-                <div class="text-xs text-gray-500 mt-2">
-                    {% if discussion.messages.last %}
-                        Последнее сообщение: {{ discussion.messages.last.created_at|date:"d M Y, H:i" }}
-                    {% else %}
-                        Нет сообщений
-                    {% endif %}
-                </div>
-            </a>
-        {% empty %}
-            <p class="text-gray-600">Вы пока не участвуете ни в одном обсуждении.</p>
-        {% endfor %}
+  <section class="panel discussion-list-panel">
+    <div class="panel__header">
+      <div>
+        <h2 class="panel__title">Ваши чаты</h2>
+        <div class="panel__subtitle">Обсуждения, в которых вы участвуете</div>
+      </div>
+      <span class="chip">{{ discussions|length }}</span>
     </div>
+    <div id="discussion-list" class="panel__body--flush">
+      {% for discussion in discussions %}
+        <a href="{% url 'discussion_detail' discussion.id %}" class="discussion-link">
+          <div class="discussion-link__avatar">{{ discussion.title|first|upper }}</div>
+          <div class="discussion-link__content">
+            <div class="discussion-link__top">
+              <h2 class="discussion-link__title">{{ discussion.title }}</h2>
+              {% if discussion.messages.last %}
+                <time>{{ discussion.messages.last.created_at|date:"d.m, H:i" }}</time>
+              {% endif %}
+            </div>
+            <div class="discussion-link__preview">
+              {% if discussion.messages.last %}
+                {{ discussion.messages.last.sender.display_name }}: {{ discussion.messages.last.text|truncatechars:90 }}
+              {% else %}
+                Сообщений пока нет
+              {% endif %}
+            </div>
+            <div class="discussion-link__meta">
+              {{ discussion.participants.count }} участников
+              {% if discussion.task %} · {{ discussion.task.title }}{% endif %}
+            </div>
+          </div>
+        </a>
+      {% empty %}
+        <div class="empty-state discussion-empty">Вы пока не участвуете ни в одном обсуждении</div>
+      {% endfor %}
+    </div>
+  </section>
 </div>
-{% endblock content %}
+{% endblock %}

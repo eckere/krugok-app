@@ -1,0 +1,27 @@
+<div id="task-results">
+  <div class="toolbar">
+    <div class="segmented" aria-label="Фильтр задач">
+      <a href="{% url 'task_list' %}?filter=all"
+         hx-get="{% url 'task_list' %}?filter=all"
+         hx-target="#task-results" hx-swap="outerHTML"
+         class="segmented__item {% if filter == 'all' %}is-active{% endif %}">
+        Все
+      </a>
+      <a href="{% url 'task_list' %}?filter=mine"
+         hx-get="{% url 'task_list' %}?filter=mine"
+         hx-target="#task-results" hx-swap="outerHTML"
+         class="segmented__item {% if filter == 'mine' %}is-active{% endif %}">
+        Мои
+      </a>
+    </div>
+  </div>
+  <div class="panel__body">
+    <div id="task-list" class="entity-list">
+      {% for task in tasks %}
+        {% include 'core/tasks/card.html' %}
+      {% empty %}
+        <div class="empty-state">Задач пока нет</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

@@ -1,0 +1,27 @@
+<div id="project-results">
+  <div class="toolbar">
+    <div class="segmented" aria-label="Фильтр проектов">
+      <a href="{% url 'project_list' %}?filter=all"
+         hx-get="{% url 'project_list' %}?filter=all"
+         hx-target="#project-results" hx-swap="outerHTML"
+         class="segmented__item {% if filter == 'all' %}is-active{% endif %}">
+        Все
+      </a>
+      <a href="{% url 'project_list' %}?filter=mine"
+         hx-get="{% url 'project_list' %}?filter=mine"
+         hx-target="#project-results" hx-swap="outerHTML"
+         class="segmented__item {% if filter == 'mine' %}is-active{% endif %}">
+        Мои
+      </a>
+    </div>
+  </div>
+  <div class="panel__body">
+    <div id="project-list" class="entity-list project-cards">
+      {% for project in projects %}
+        {% include 'core/projects/card.html' %}
+      {% empty %}
+        <div class="empty-state">Проектов пока нет</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>

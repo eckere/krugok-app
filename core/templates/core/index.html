@@ -1,58 +1,105 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
-    <div class="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow-lg">
-        {% if user.is_authenticated %}
-            <div class="space-y-6">
-                <div class="space-y-1">
-                    <h1 class="text-2xl font-semibold text-slate-900">Привет, {{ user.first_name }}!</h1>
-                    <p class="text-sm text-slate-600">Тестовый режим активирован.</p>
-                </div>
+{% if user.is_authenticated %}
+<div class="app-content">
+    <header class="page-header">
+        <div>
+            <h1 class="page-header__title">Главная</h1>
+            <p class="page-header__subtitle">Обзор задач и проектов команды</p>
+        </div>
+        <div class="page-header__actions">
+            <button type="button" class="btn btn-primary"
+                    hx-get="{% url 'task_create' %}" hx-target="#task-modal" hx-swap="innerHTML">
+                + Новая задача
+            </button>
+        </div>
+    </header>
 
-                <div class="flex gap-2 border-b border-slate-200 pb-3" id="main-tabs">
-                    <button type="button" data-tab="tasks" onclick="switchTab('tasks')"
-                            class="tab-btn rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">
-                        Задачи
-                    </button>
-                    <button type="button" data-tab="projects" onclick="switchTab('projects')"
-                            class="tab-btn rounded-full border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700">
-                        Проекты
-                    </button>
-                </div>
+    <div id="task-modal"></div>
+    <div id="project-modal"></div>
 
-                <div id="tab-tasks">
-                    {% include 'core/tasks/list.html' %}
-                </div>
-                <div id="tab-projects" class="hidden">
-                    {% include 'core/projects/list.html' %}
-                </div>
+    <section class="stats-grid" aria-label="Сводка">
+        <article class="stat-card">
+            <div class="stat-card__label">Всего задач</div>
+            <div class="stat-card__value">{{ task_stats.total }}</div>
+        </article>
+        <article class="stat-card">
+            <div class="stat-card__label">В работе</div>
+            <div class="stat-card__value">{{ task_stats.active }}</div>
+        </article>
+        <article class="stat-card">
+            <div class="stat-card__label">Выполнено</div>
+            <div class="stat-card__value stat-card__value--green">{{ task_stats.done }}</div>
+        </article>
+        <article class="stat-card">
+            <div class="stat-card__label">Просрочено</div>
+            <div class="stat-card__value stat-card__value--red">{{ task_stats.overdue }}</div>
+        </article>
+    </section>
 
-                <script>
-                    function switchTab(tab) {
-                        document.getElementById('tab-tasks').classList.toggle('hidden', tab !== 'tasks');
-                        document.getElementById('tab-projects').classList.toggle('hidden', tab !== 'projects');
-                        document.querySelectorAll('#main-tabs .tab-btn').forEach(function (btn) {
-                            var active = btn.dataset.tab === tab;
-                            btn.classList.toggle('bg-slate-900', active);
-                            btn.classList.toggle('text-white', active);
-                            btn.classList.toggle('border', !active);
-                            btn.classList.toggle('border-slate-300', !active);
-                            btn.classList.toggle('bg-white', !active);
-                            btn.classList.toggle('text-slate-700', !active);
-                        });
-                    }
-                </script>
+    <div class="dashboard-grid">
+        <section class="panel">
+            <div class="panel__header">
+                <div>
+                    <h2 class="panel__title">Ближайшие задачи</h2>
+                    <div class="panel__subtitle">Доступные вам задачи по сроку и статусу</div>
+                </div>
+                <a href="{% url 'task_list' %}" class="btn btn-secondary btn-sm">Все задачи</a>
             </div>
-        {% else %}
-            <div class="space-y-6 text-center">
-                <h1 class="text-3xl font-semibold text-slate-900">КружокAPP</h1>
-                <p class="text-sm text-slate-500">Временно работаем в обычном браузере.</p>
-                <a href="{% url 'dev_login' %}" class="inline-flex rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">
-                    Войти как Разработчик
-                </a>
+            <div class="panel__body">
+                <div id="task-list" class="entity-list">
+                    {% for task in tasks|slice:":5" %}
+                        {% include 'core/tasks/card.html' %}
+                    {% empty %}
+                        <div class="empty-state">Задач пока нет</div>
+                    {% endfor %}
+                </div>
             </div>
-        {% endif %}
+        </section>
+
+        <aside>
+            <section class="panel">
+                <div class="panel__header">
+                    <div>
+                        <h2 class="panel__title">Проекты</h2>
+                        <div class="panel__subtitle">{{ project_count }} доступно</div>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm"
+                            hx-get="{% url 'project_create' %}" hx-target="#project-modal" hx-swap="innerHTML">
+                        + Проект
+                    </button>
+                </div>
+                <div class="panel__body">
+                    <div id="project-list" class="entity-list">
+                        {% for project in projects|slice:":4" %}
+                            {% include 'core/projects/card.html' with compact=True %}
+                        {% empty %}
+                            <div class="empty-state">Проектов пока нет</div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
+            <section class="panel">
+                <div class="panel__body quick-stats">
+                    <div>
+                        <div class="stat-card__label">Обсуждения</div>
+                        <div class="quick-stats__value">{{ discussion_count }}</div>
+                    </div>
+                    <a href="{% url 'discussion_list' %}" class="btn btn-secondary btn-sm">Открыть</a>
+                </div>
+            </section>
+        </aside>
     </div>
 </div>
+{% else %}
+<div class="auth-layout">
+    <section class="auth-card">
+        <div class="auth-logo">К</div>
+        <h1 class="auth-title">КружокAPP</h1>
+        <p class="auth-copy">Задачи, проекты и командные обсуждения в одном месте.</p>
+        <a href="{% url 'dev_login' %}" class="btn btn-primary">Войти в тестовом режиме</a>
+    </section>
+</div>
+{% endif %}
 {% endblock %}

@@ -1,110 +1,128 @@
 {% extends 'base.html' %}
 {% load core_permissions %}
 
+{% block title %}{{ project.name }} — КружокAPP{% endblock %}
+
 {% block content %}
-<div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-4xl rounded-3xl bg-white p-8 shadow-lg">
-    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-2xl font-semibold text-slate-900">{{ project.name }}</h1>
-        {% if project.description %}
-          <p class="mt-2 text-sm text-slate-600">{{ project.description }}</p>
-        {% endif %}
-      </div>
-      <div class="flex flex-wrap gap-2">
-        {% if project|can_admin_project:user %}
-          <button type="button" hx-get="{% url 'project_update' project.id %}?return_to=detail" hx-target="#project-modal" hx-swap="innerHTML" class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">Редактировать</button>
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <div class="page-header__eyebrow">Проект</div>
+      <h1 class="page-header__title">{{ project.name }}</h1>
+      {% if project.description %}
+        <p class="page-header__subtitle">{{ project.description }}</p>
+      {% else %}
+        <p class="page-header__subtitle">Этапы, задачи и команда проекта</p>
+      {% endif %}
+    </div>
+    <div class="page-header__actions">
+      {% if project|can_admin_project:user %}
+        <button type="button" class="btn btn-secondary"
+                hx-get="{% url 'project_update' project.id %}?return_to=detail"
+                hx-target="#project-modal" hx-swap="innerHTML">
+          Изменить
+        </button>
+        <button type="button" class="btn btn-primary"
+                hx-get="{% url 'stage_create' project.id %}"
+                hx-target="#stage-modal" hx-swap="innerHTML">
+          + Новый этап
+        </button>
+      {% endif %}
+    </div>
+  </header>
+
+  <div id="project-modal"></div>
+  <div id="stage-modal"></div>
+  <div id="member-modal"></div>
+  <div id="task-modal"></div>
+
+  <div class="project-layout">
+    <main class="project-main">
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2 class="panel__title">Этапы проекта</h2>
+            <div class="panel__subtitle">Задачи сгруппированы по рабочим ступеням</div>
+          </div>
+        </div>
+        <div class="panel__body">
+          <div id="stage-list" class="stage-list">
+            {% for stage in stages %}
+              {% include 'core/stages/card.html' %}
+            {% empty %}
+              <div class="empty-state">Этапов пока нет. Создайте первый этап проекта.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2 class="panel__title">Без этапа</h2>
+            <div class="panel__subtitle">Задачи, которые ещё не распределены</div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm"
+                  hx-get="{% url 'task_create' %}?project={{ project.id }}&return_to=project"
+                  hx-target="#task-modal" hx-swap="innerHTML">
+            + Задача
+          </button>
+        </div>
+        <div class="panel__body">
+          <div id="project-unassigned-task-list" class="entity-list">
+            {% for task in unassigned_tasks %}
+              {% include 'core/tasks/card.html' with task_project_context=True %}
+            {% empty %}
+              <div class="empty-state">Нераспределённых задач нет</div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="project-aside">
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2 class="panel__title">Участники</h2>
+            <div class="panel__subtitle">Доступ и роли в проекте</div>
+          </div>
+          {% if project|can_own_project:user %}
+            <button type="button" class="btn btn-secondary btn-sm"
+                    hx-get="{% url 'project_member_create' project.id %}"
+                    hx-target="#member-modal" hx-swap="innerHTML">
+              + Добавить
+            </button>
+          {% endif %}
+        </div>
+        <div id="member-list" class="panel__body member-list">
+          {% for membership in memberships %}
+            {% include 'core/projects/members/card.html' %}
+          {% empty %}
+            <div class="empty-state">Участников пока нет</div>
+          {% endfor %}
+        </div>
+      </section>
+
+      {% if project|can_admin_project:user %}
+      <section class="panel">
+        <div class="panel__body project-settings">
+          <div>
+            <h2 class="panel__title">Управление проектом</h2>
+            <div class="panel__subtitle">Архив скрывает проект из рабочих списков</div>
+          </div>
           <button type="button"
                   hx-post="{% url 'project_archive' project.id %}"
                   hx-vals='{"return_to": "projects"}'
                   hx-swap="none"
                   hx-confirm="Архивировать проект «{{ project.name }}»?"
-                  class="shrink-0 rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">
-            Архивировать
-          </button>
-        {% endif %}
-        <a href="{% url 'project_list' %}" class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">К проектам</a>
-        {% if project|can_admin_project:user %}
-          <button type="button" hx-get="{% url 'stage_create' project.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">+ Этап</button>
-        {% endif %}
-      </div>
-    </div>
-
-    <div id="stage-modal"></div>
-    <div id="member-modal"></div>
-    <div id="task-modal"></div>
-
-    <div class="mb-6 rounded-2xl border border-gray-200 bg-slate-50 p-4">
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-semibold text-gray-900">Участники</h2>
-          <p class="text-sm text-gray-500">Доступ к проекту и роли участников</p>
-        </div>
-        {% if project|can_own_project:user %}
-          <button type="button"
-                  hx-get="{% url 'project_member_create' project.id %}"
-                  hx-target="#member-modal"
-                  hx-swap="innerHTML"
-                  class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
-            + Участник
-          </button>
-        {% endif %}
-      </div>
-
-      <div id="member-list" class="mt-4 space-y-2">
-        {% for membership in memberships %}
-          {% include 'core/projects/members/card.html' %}
-        {% empty %}
-          <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">
-            Участников пока нет.
-          </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="space-y-4">
-      <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h2 class="text-lg font-semibold text-gray-900">Этапы</h2>
-            <p class="text-sm text-gray-500">Упорядоченные этапы проекта</p>
-          </div>
-        </div>
-      </div>
-
-      <div id="stage-list" class="space-y-3">
-        {% for stage in stages %}
-          {% include 'core/stages/card.html' %}
-        {% empty %}
-          <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">Этапов пока нет.</div>
-        {% endfor %}
-      </div>
-
-      <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h2 class="text-lg font-semibold text-gray-900">Без этапа</h2>
-            <p class="text-sm text-gray-500">Задачи проекта, которые ещё не распределены</p>
-          </div>
-          <button type="button"
-                  hx-get="{% url 'task_create' %}?project={{ project.id }}&return_to=project"
-                  hx-target="#task-modal"
-                  hx-swap="innerHTML"
-                  class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">
-            + Задача
+                  class="btn btn-secondary btn-sm">
+            Перенести в архив
           </button>
         </div>
-        <div id="project-unassigned-task-list" class="space-y-2">
-          {% for task in unassigned_tasks %}
-            {% include 'core/tasks/card.html' with task_project_context=True %}
-          {% empty %}
-            <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">
-              Нераспределённых задач нет.
-            </div>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
+      </section>
+      {% endif %}
+    </aside>
   </div>
 </div>
 {% endblock %}

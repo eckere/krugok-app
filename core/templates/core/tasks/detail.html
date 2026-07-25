@@ -1,58 +1,93 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="min-h-screen bg-slate-50 px-4 py-10 sm:px-6 lg:px-8">
-  <div class="mx-auto max-w-3xl rounded-3xl bg-white p-8 shadow-lg">
-    <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-2xl font-semibold text-slate-900">{{ task.title }}</h1>
-        {% if task.project %}
-          <p class="text-sm text-slate-500">Проект: {{ task.project.name }}</p>
-        {% endif %}
-      </div>
-      <a href="{% url 'index' %}" class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50">Назад</a>
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <div class="page-header__eyebrow">{% if task.project %}{{ task.project.name }}{% else %}Задача без проекта{% endif %}</div>
+      <h1 class="page-header__title">{{ task.title }}</h1>
+      <p class="page-header__subtitle">Создана {{ task.created_at|date:'d.m.Y, H:i' }}</p>
     </div>
+    <div class="page-header__actions">
+      <a href="{% if task.project %}{% url 'project_detail' task.project.id %}{% else %}{% url 'task_list' %}{% endif %}" class="btn btn-secondary">Назад</a>
+    </div>
+  </header>
 
-    <div class="space-y-4">
-      <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
-        <div class="space-y-3 text-sm text-slate-700">
-          {% if task.description %}
-            <p>{{ task.description }}</p>
-          {% endif %}
-          <p>Статус: {{ task.get_status_display }}</p>
-          {% if task.stage %}<p>Этап: {{ task.stage.name }}</p>{% endif %}
-          {% if task.assignee %}<p>Исполнитель: {{ task.assignee.get_full_name|default:task.assignee.username }}</p>{% endif %}
-          {% if task.deadline %}<p>Дедлайн: {{ task.deadline|date:'d.m.Y H:i' }}</p>{% endif %}
-          <p>Просрочена: {% if task.is_overdue %}да{% else %}нет{% endif %}</p>
+  <div class="detail-grid">
+    <div>
+      <section class="panel">
+        <div class="panel__header">
+          <h2 class="panel__title">Детали задачи</h2>
+          <span class="status {% if task.status == 'done' %}status--done{% elif task.status == 'in_progress' %}status--progress{% else %}status--new{% endif %}">
+            {{ task.get_status_display }}
+          </span>
         </div>
-      </div>
+        <div class="panel__body">
+          {% if task.description %}
+            <div class="detail-description">{{ task.description|linebreaksbr }}</div>
+          {% else %}
+            <div class="detail-description detail-description--muted">Описание не добавлено</div>
+          {% endif %}
+          <div class="definition-list detail-definitions">
+            <div class="definition-item">
+              <div class="definition-item__label">Ответственный</div>
+              <div class="definition-item__value">{% if task.assignee %}{{ task.assignee.display_name }}{% else %}Не назначен{% endif %}</div>
+            </div>
+            <div class="definition-item">
+              <div class="definition-item__label">Дедлайн</div>
+              <div class="definition-item__value {% if task.is_overdue %}meta-danger{% endif %}">
+                {% if task.deadline %}{{ task.deadline|date:'d.m.Y, H:i' }}{% else %}Не установлен{% endif %}
+              </div>
+            </div>
+            <div class="definition-item">
+              <div class="definition-item__label">Проект</div>
+              <div class="definition-item__value">{% if task.project %}{{ task.project.name }}{% else %}Без проекта{% endif %}</div>
+            </div>
+            <div class="definition-item">
+              <div class="definition-item__label">Этап</div>
+              <div class="definition-item__value">{% if task.stage %}{{ task.stage.name }}{% else %}Без этапа{% endif %}</div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <div class="rounded-2xl border border-gray-200 bg-white p-4">
-        <h2 class="text-lg font-semibold text-gray-900">Комментарии</h2>
-        <div id="comment-list" class="space-y-3 mt-4">
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2 class="panel__title">Комментарии</h2>
+            <div class="panel__subtitle">История обсуждения задачи</div>
+          </div>
+        </div>
+        <div id="comment-list" class="comment-list">
           {% for comment in comments %}
             {% include 'core/tasks/comment.html' %}
           {% empty %}
-            <div class="rounded-lg border border-dashed border-gray-300 bg-slate-50 p-4 text-sm text-gray-500">Комментариев пока нет.</div>
+            <div class="empty-state">Комментариев пока нет</div>
           {% endfor %}
         </div>
-      </div>
+      </section>
+    </div>
 
-      <div class="rounded-2xl border border-gray-200 bg-white p-4">
-        <h2 class="text-lg font-semibold text-gray-900">Добавить комментарий</h2>
-        <form method="post" action="{% url 'comment_create' task.id %}" class="mt-4 space-y-3">
+    <aside class="panel">
+      <div class="panel__header">
+        <h2 class="panel__title">Новый комментарий</h2>
+      </div>
+      <div class="panel__body">
+        <form method="post" action="{% url 'comment_create' task.id %}">
           {% csrf_token %}
-          <div>
-            <label class="mb-1 block text-sm font-medium text-gray-700">Комментарий</label>
+          <div class="form-field">
+            <label class="form-label">Комментарий</label>
             {{ comment_form.text }}
             {% if comment_form.text.errors %}
-              <div class="mt-1 text-sm text-red-600">{{ comment_form.text.errors|join:', ' }}</div>
+              <div class="form-error">{{ comment_form.text.errors|join:', ' }}</div>
             {% endif %}
           </div>
-          <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">Отправить</button>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Отправить</button>
+          </div>
         </form>
       </div>
-    </div>
+    </aside>
   </div>
 </div>
 {% endblock %}

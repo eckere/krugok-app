@@ -1,35 +1,26 @@
-{% if not request.htmx %}
-  <div class="space-y-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-gray-900">Задачи</h2>
-        <p class="text-sm text-gray-500">Список задач и быстрые действия</p>
-      </div>
-      <button type="button" hx-get="{% url 'task_create' %}" hx-target="#task-modal" hx-swap="innerHTML" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">
+{% extends 'base.html' %}
+
+{% block title %}Задачи — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <h1 class="page-header__title">Задачи</h1>
+      <p class="page-header__subtitle">Личные и командные задачи в одном списке</p>
+    </div>
+    <div class="page-header__actions">
+      <button type="button" class="btn btn-primary"
+              hx-get="{% url 'task_create' %}" hx-target="#task-modal" hx-swap="innerHTML">
         + Новая задача
       </button>
     </div>
+  </header>
 
-    <div id="task-modal"></div>
+  <div id="task-modal"></div>
 
-    <div class="flex gap-2">
-      <a href="{% url 'task_list' %}?filter=all" hx-get="{% url 'task_list' %}?filter=all" hx-target="#task-list" hx-swap="outerHTML" class="rounded-full border px-3 py-1 text-sm {% if filter == 'all' %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}">
-        Все
-      </a>
-      <a href="{% url 'task_list' %}?filter=mine" hx-get="{% url 'task_list' %}?filter=mine" hx-target="#task-list" hx-swap="outerHTML" class="rounded-full border px-3 py-1 text-sm {% if filter == 'mine' %}bg-slate-900 text-white{% else %}bg-white text-slate-700{% endif %}">
-        Мои
-      </a>
-    </div>
-{% endif %}
-
-    <div id="task-list" class="space-y-3">
-      {% for task in tasks %}
-        {% include 'core/tasks/card.html' %}
-      {% empty %}
-        <div class="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-500">Задач пока нет.</div>
-      {% endfor %}
-    </div>
-
-{% if not request.htmx %}
-  </div>
-{% endif %}
+  <section class="panel">
+    {% include 'core/tasks/list_items.html' %}
+  </section>
+</div>
+{% endblock %}

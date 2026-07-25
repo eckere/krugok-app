@@ -1,44 +1,44 @@
 {% load core_permissions %}
-<div id="stage-{{ stage.id }}" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+<article id="stage-{{ stage.id }}" class="stage-card">
+  <div class="stage-card__header">
     <div>
-      <div class="flex items-center gap-2">
-        <h3 class="font-semibold text-gray-900">{{ stage.name }}</h3>
-        <span class="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">#{{ stage.order }}</span>
+      <div class="entity-card__title-row">
+        <span class="stage-number">{{ stage.order|default:"—" }}</span>
+        <h3 class="entity-card__title">{{ stage.name }}</h3>
+        <span class="status {% if stage.status == 'done' %}status--done{% elif stage.status == 'in_progress' %}status--progress{% else %}status--new{% endif %}">
+          {{ stage.get_status_display }}
+        </span>
       </div>
-      <div class="mt-2 flex flex-wrap gap-3 text-sm text-gray-500">
-        <span>Статус: {{ stage.get_status_display }}</span>
-        {% if stage.deadline %}<span>Дедлайн: {{ stage.deadline|date:'d.m.Y' }}</span>{% endif %}
+      <div class="entity-card__meta">
+        {% if stage.deadline %}<span>До {{ stage.deadline|date:'d.m.Y' }}</span>{% else %}<span>Без дедлайна</span>{% endif %}
+        <span>{{ stage.tasks.count }} задач</span>
       </div>
     </div>
-    {% if project|can_admin_project:user %}
-    <div class="flex flex-wrap gap-2">
-      <button type="button" hx-get="{% url 'stage_update' stage.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Ред.</button>
-      <button type="button" hx-post="{% url 'stage_archive' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Архивировать этап «{{ stage.name }}»?" class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">Архив</button>
-      <button type="button" hx-delete="{% url 'stage_delete' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Удалить этап «{{ stage.name }}»?" class="rounded-md border border-red-200 px-2 py-1 text-sm text-red-600">Удалить</button>
+    <div class="entity-card__actions">
+      {% if project|can_admin_project:user %}
+        <button type="button" hx-get="{% url 'stage_update' stage.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="btn btn-secondary btn-sm">Изменить</button>
+        <button type="button" hx-post="{% url 'stage_archive' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Архивировать этап «{{ stage.name }}»?" class="btn btn-secondary btn-sm">В архив</button>
+        <button type="button" hx-delete="{% url 'stage_delete' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Удалить этап «{{ stage.name }}»?" class="btn btn-danger btn-sm">Удалить</button>
+      {% endif %}
     </div>
-    {% endif %}
   </div>
 
-  <div class="mt-4 border-t border-gray-100 pt-4">
-    <div class="mb-3 flex items-center justify-between gap-3">
-      <h4 class="text-sm font-semibold text-gray-800">Задачи</h4>
+  <div class="stage-card__tasks">
+    <div class="stage-card__tasks-header">
+      <strong class="section-label">Задачи этапа</strong>
       <button type="button"
               hx-get="{% url 'task_create' %}?project={{ project.id }}&stage={{ stage.id }}&return_to=project"
-              hx-target="#task-modal"
-              hx-swap="innerHTML"
-              class="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700">
+              hx-target="#task-modal" hx-swap="innerHTML"
+              class="btn btn-secondary btn-sm">
         + Задача
       </button>
     </div>
-    <div id="stage-{{ stage.id }}-task-list" class="space-y-2">
+    <div id="stage-{{ stage.id }}-task-list" class="entity-list">
       {% for task in stage.tasks.all %}
         {% include 'core/tasks/card.html' with task_project_context=True %}
       {% empty %}
-        <div class="rounded-lg border border-dashed border-gray-200 bg-slate-50 p-3 text-sm text-gray-500">
-          В этом этапе задач пока нет.
-        </div>
+        <div class="empty-state empty-state--compact">В этом этапе задач пока нет</div>
       {% endfor %}
     </div>
   </div>
-</div>
+</article>

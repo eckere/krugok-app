@@ -12,6 +12,7 @@ from django.db import models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
@@ -39,17 +40,44 @@ from .telegram_auth import InitDataValidationError, validate_init_data
 logger = logging.getLogger(__name__)
 
 
+def _close_modal(response, modal_id):
+    """Просит клиент закрыть модальное окно после успешной HTMX-операции."""
+    response.headers['HX-Trigger'] = json.dumps(
+        {'closeModal': {'id': modal_id}}
+    )
+    return response
+
+
 
 
 @ensure_csrf_cookie
 def index(request):
     context = {}
     if request.user.is_authenticated:
-        context['tasks'] = get_accessible_tasks(request.user).select_related(
+        tasks = get_accessible_tasks(request.user).select_related(
             'project', 'assignee'
         ).order_by('status', 'deadline')
-        context['filter'] = 'all'
-        context['projects'] = get_accessible_projects(request.user).order_by('-created_at')
+        projects = get_accessible_projects(request.user).order_by('-created_at')
+        discussions = Discussion.objects.filter(
+            models.Q(created_by=request.user) | models.Q(participants=request.user)
+        ).distinct()
+        context.update(
+            {
+                'tasks': tasks,
+                'filter': 'all',
+                'projects': projects,
+                'task_stats': {
+                    'total': tasks.count(),
+                    'active': tasks.exclude(status=Task.Status.DONE).count(),
+                    'done': tasks.filter(status=Task.Status.DONE).count(),
+                    'overdue': tasks.exclude(status=Task.Status.DONE).filter(
+                        deadline__lt=timezone.now()
+                    ).count(),
+                },
+                'project_count': projects.count(),
+                'discussion_count': discussions.count(),
+            }
+        )
     return render(request, 'core/index.html', context)
 
 
@@ -122,7 +150,10 @@ def task_list(request):
     if filter_value == 'mine':
         tasks = tasks.filter(assignee=request.user)
 
-    return render(request, 'core/tasks/list.html', {'tasks': tasks, 'filter': filter_value})
+    template_name = (
+        'core/tasks/list_items.html' if request.htmx else 'core/tasks/list.html'
+    )
+    return render(request, template_name, {'tasks': tasks, 'filter': filter_value})
 
 
 @login_required
@@ -173,7 +204,7 @@ def task_create(request):
                     target = '#project-unassigned-task-list'
                 response.headers['HX-Retarget'] = target
                 response.headers['HX-Reswap'] = 'beforeend'
-            return response
+            return _close_modal(response, 'task-modal')
         response = render(
             request,
             'core/tasks/form.html',
@@ -230,7 +261,8 @@ def task_update(request, task_id):
                 return HttpResponse(
                     headers={'HX-Redirect': redirect_url}
                 )
-            return render(request, 'core/tasks/card.html', {'task': task})
+            response = render(request, 'core/tasks/card.html', {'task': task})
+            return _close_modal(response, 'task-modal')
         response = render(
             request,
             'core/tasks/form.html',
@@ -327,7 +359,14 @@ def project_list(request):
                 project_memberships__role=ProjectMembership.Role.OWNER,
             )
         ).distinct()
-    return render(request, 'core/projects/list.html', {'projects': projects, 'filter': filter_value})
+    template_name = (
+        'core/projects/list_items.html' if request.htmx else 'core/projects/list.html'
+    )
+    return render(
+        request,
+        template_name,
+        {'projects': projects, 'filter': filter_value},
+    )
 
 
 @login_required
@@ -376,7 +415,8 @@ def project_create(request):
                 user=request.user,
                 role=ProjectMembership.Role.OWNER,
             )
-            return render(request, 'core/projects/card.html', {'project': project})
+            response = render(request, 'core/projects/card.html', {'project': project})
+            return _close_modal(response, 'project-modal')
         return render(
             request,
             'core/projects/form.html',
@@ -399,7 +439,8 @@ def project_update(request, project_id):
                 return HttpResponse(
                     headers={'HX-Redirect': reverse('project_detail', args=[project.id])}
                 )
-            return render(request, 'core/projects/card.html', {'project': project})
+            response = render(request, 'core/projects/card.html', {'project': project})
+            return _close_modal(response, 'project-modal')
         return render(
             request,
             'core/projects/form.html',
@@ -450,11 +491,12 @@ def project_member_create(request, project_id):
             membership = form.save(commit=False)
             membership.project = project
             membership.save()
-            return render(
+            response = render(
                 request,
                 'core/projects/members/card.html',
                 {'project': project, 'membership': membership},
             )
+            return _close_modal(response, 'member-modal')
         return render(
             request,
             'core/projects/members/form.html',
@@ -488,11 +530,12 @@ def project_member_update(request, membership_id):
         form = ProjectMembershipRoleForm(request.POST, instance=membership)
         if form.is_valid():
             membership = form.save()
-            return render(
+            response = render(
                 request,
                 'core/projects/members/card.html',
                 {'project': project, 'membership': membership},
             )
+            return _close_modal(response, 'member-modal')
         return render(
             request,
             'core/projects/members/form.html',
@@ -552,7 +595,12 @@ def stage_create(request, project_id):
                 project.stages.filter(is_archived=False, order__gte=stage.order).update(order=models.F('order') + 1)
             stage.save()
             _normalize_stage_order(project)
-            return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
+            response = render(
+                request,
+                'core/stages/card.html',
+                {'project': project, 'stage': stage},
+            )
+            return _close_modal(response, 'stage-modal')
         return render(
             request,
             'core/stages/form.html',
@@ -588,7 +636,12 @@ def stage_update(request, stage_id):
                 stage.order = new_order
             stage.save()
             _normalize_stage_order(project)
-            return render(request, 'core/stages/card.html', {'project': project, 'stage': stage})
+            response = render(
+                request,
+                'core/stages/card.html',
+                {'project': project, 'stage': stage},
+            )
+            return _close_modal(response, 'stage-modal')
         return render(
             request,
             'core/stages/form.html',

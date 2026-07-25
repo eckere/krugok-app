@@ -1,16 +1,7 @@
-<div class="flex items-start gap-3 {% if message.sender == request.user %}flex-row-reverse{% endif %}">
-    <div class="flex-shrink-0">
-        {# You might want to add user avatars here later using message.sender.photo_url #}
-        <div class="h-8 w-8 rounded-full bg-gray-300 flex items-center justify-center font-bold text-gray-600">
-            {{ message.sender.first_name|first|upper }}
-        </div>
-    </div>
-    <div class="max-w-xs md:max-w-md">
-        <div class="rounded-lg p-3 {% if message.sender == request.user %}bg-blue-500 text-white{% else %}bg-gray-200 text-gray-800{% endif %}">
-            <p class="text-sm">{{ message.text|linebreaksbr }}</p>
-        </div>
-        <div class="text-xs text-gray-500 mt-1 px-1 {% if message.sender == request.user %}text-right{% endif %}">
-            {{ message.sender.display_name }}, {{ message.created_at|date:"H:i" }}
-        </div>
-    </div>
-</div>
+<article class="message {% if message.sender == request.user %}message--mine{% endif %}">
+  <div class="message__avatar">{{ message.sender.first_name|default:message.sender.username|first|upper }}</div>
+  <div class="message__body">
+    <div class="message__bubble">{{ message.text|linebreaksbr }}</div>
+    <div class="message__meta">{{ message.sender.display_name }}, {{ message.created_at|date:"H:i" }}</div>
+  </div>
+</article>

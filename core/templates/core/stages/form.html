@@ -1,29 +1,31 @@
-<div id="stage-form" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-  <div class="mb-3 flex items-center justify-between">
-    <h3 class="text-lg font-semibold text-gray-900">{% if form.instance.pk %}Редактировать этап{% else %}Новый этап{% endif %}</h3>
-    <button type="button" onclick="document.getElementById('stage-modal').innerHTML=''" class="text-sm text-gray-500">Закрыть</button>
+<div class="modal-backdrop" onclick="if(event.target===this){document.getElementById('stage-modal').innerHTML=''}">
+<section id="stage-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true">
+  <div class="modal-header">
+    <h3 class="modal-title">{% if form.instance.pk %}Редактировать этап{% else %}Новый этап{% endif %}</h3>
+    <button type="button" aria-label="Закрыть" onclick="document.getElementById('stage-modal').innerHTML=''" class="modal-close">×</button>
   </div>
 
   <form method="post"
         hx-post="{% if form.instance.pk %}{% url 'stage_update' form.instance.pk %}{% else %}{% url 'stage_create' project.id %}{% endif %}"
         {% if form.instance.pk %}
-        hx-target="#stage-{{ form.instance.pk }}" hx-swap="outerHTML"
+          hx-target="#stage-{{ form.instance.pk }}" hx-swap="outerHTML"
         {% else %}
-        hx-target="#stage-list" hx-swap="beforeend"
+          hx-target="#stage-list" hx-swap="beforeend"
         {% endif %}>
     {% csrf_token %}
-    <div class="space-y-3">
+    <div class="form-grid">
       {% for field in form %}
-        <div>
-          <label class="mb-1 block text-sm font-medium text-gray-700">{{ field.label }}</label>
+        <div class="form-field {% if field.name == 'name' %}form-field--full{% endif %}">
+          <label class="form-label">{{ field.label }}</label>
           {{ field }}
-          {% if field.errors %}<div class="mt-1 text-sm text-red-600">{{ field.errors|join:', ' }}</div>{% endif %}
+          {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
         </div>
       {% endfor %}
     </div>
-    <div class="mt-4 flex gap-2">
-      <button type="submit" class="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white">Сохранить</button>
-      <button type="button" onclick="document.getElementById('stage-modal').innerHTML=''" class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-700">Отмена</button>
+    <div class="form-actions">
+      <button type="button" onclick="document.getElementById('stage-modal').innerHTML=''" class="btn btn-ghost">Отмена</button>
+      <button type="submit" class="btn btn-primary">Сохранить</button>
     </div>
   </form>
+</section>
 </div>

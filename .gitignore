@@ -11,12 +11,17 @@ db.sqlite3
 
 # Environment
 .env
+.env.production
 
 # VS Code
 .vscode/
 
 # Django
 media/
+staticfiles/
+
+# Local backups
+backups/
 
 # macOS
 .DS_Store

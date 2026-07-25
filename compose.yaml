@@ -1,0 +1,58 @@
+services:
+  web:
+    image: krugok-app:latest
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    volumes:
+      - sqlite_data:/app/data
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/healthz/', headers={'Host': os.environ['APP_DOMAIN'], 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=5)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  deadline-worker:
+    image: krugok-app:latest
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    command: ["sh", "/app/docker/deadline-worker.sh"]
+    volumes:
+      - sqlite_data:/app/data
+    depends_on:
+      web:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  sqlite_data:
+  caddy_data:
+  caddy_config:

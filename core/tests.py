@@ -24,6 +24,14 @@ from .telegram_auth import InitDataValidationError
 from .telegram_notifications import notify
 
 
+class HealthcheckTests(TestCase):
+    def test_healthcheck_returns_ok(self):
+        response = self.client.get(reverse('healthcheck'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'ok'})
+
+
 class TelegramAuthenticationTests(TestCase):
     @patch('core.views.validate_init_data')
     def test_valid_init_data_creates_user_and_logs_in(self, validate_init_data):

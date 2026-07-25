@@ -60,6 +60,8 @@ MIDDLEWARE = [
     # и т.д.), чтобы во view отличать полный запрос от партиала HTMX.
     'django_htmx.middleware.HtmxMiddleware',
 ]
+if not DEBUG:
+    MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 # Кастомная модель пользователя. ОБЯЗАТЕЛЬНО указывается до первой миграции —
 # после того как таблицы созданы, сменить AUTH_USER_MODEL штатно нельзя.
@@ -92,7 +94,10 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': Path(os.environ.get('DATABASE_PATH', BASE_DIR / 'db.sqlite3')),
+        'OPTIONS': {
+            'timeout': int(os.environ.get('SQLITE_TIMEOUT', '30')),
+        },
     }
 }
 
@@ -134,7 +139,20 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': (
+            'django.contrib.staticfiles.storage.StaticFilesStorage'
+            if DEBUG
+            else 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+        ),
+    },
+}
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +186,13 @@ if TELEGRAM_SECURE_COOKIES:
 CSRF_TRUSTED_ORIGINS = [
     o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()
 ]
+
+# Production traffic terminates TLS at Caddy and reaches Django over the
+# internal Docker network. Trust only Caddy's standard forwarded-proto header.
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_SSL_REDIRECT = (
+    not DEBUG or os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
+)
+SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0

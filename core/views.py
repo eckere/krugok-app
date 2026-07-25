@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db import models
+from django.db import connection, models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -51,6 +51,13 @@ from .telegram_auth import InitDataValidationError, validate_init_data
 from .telegram_notifications import notify
 
 logger = logging.getLogger(__name__)
+
+
+def healthcheck(request):
+    with connection.cursor() as cursor:
+        cursor.execute('SELECT 1')
+        cursor.fetchone()
+    return JsonResponse({'status': 'ok'})
 
 
 def _close_modal(response, modal_id):

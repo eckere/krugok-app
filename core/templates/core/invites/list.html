@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Приглашения — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+    <header class="page-header">
+        <div>
+            <h1 class="page-header__title">Приглашения</h1>
+            <p class="page-header__subtitle">Создайте персональную ссылку для друга. Каждое приглашение одноразовое.</p>
+        </div>
+        <div class="page-header__actions">
+            <form method="post" action="{% url 'invite_create' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary">+ Пригласить</button>
+            </form>
+        </div>
+    </header>
+
+    <section class="panel">
+        <div class="panel__body">
+            <div class="entity-list">
+                {% for row in invite_rows %}
+                    <article class="entity-card">
+                        <div class="entity-card__content">
+                            <div class="entity-card__title">Код: <code>{{ row.invite.code }}</code></div>
+                            <div class="entity-card__meta">
+                                <span>Действует до {{ row.invite.expires_at|date:'d.m.Y, H:i' }}</span>
+                            </div>
+                            <div class="form-field">
+                                <label for="invite-link-{{ row.invite.id }}">Ссылка для друга</label>
+                                <input id="invite-link-{{ row.invite.id }}" type="text" value="{{ row.url }}" readonly onclick="this.select()">
+                            </div>
+                        </div>
+                    </article>
+                {% empty %}
+                    <div class="empty-state">Активных приглашений пока нет</div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+</div>
+{% endblock %}

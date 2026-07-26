@@ -1,19 +1,55 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.conf import settings
 from django.http import HttpRequest
+from django.utils.html import format_html
 
-from .models import Notification, Project, ProjectMembership, Task, TelegramUser
+from .models import InviteCode, Notification, Project, ProjectMembership, Task, TelegramUser
 
 
 @admin.register(TelegramUser)
 class TelegramUserAdmin(UserAdmin):
-    list_display = ('username', 'telegram_id', 'first_name', 'last_name', 'is_active', 'is_staff', 'is_premium')
-    list_filter = ('is_active', 'is_staff', 'is_premium')
+    list_display = ('username', 'telegram_id', 'first_name', 'last_name', 'is_active', 'is_staff', 'is_premium', 'is_verified')
+    list_filter = ('is_active', 'is_staff', 'is_premium', 'is_verified')
     search_fields = ('username', 'first_name', 'last_name', 'telegram_id')
     fieldsets = UserAdmin.fieldsets + (
-        ('Telegram', {'fields': ('telegram_id', 'photo_url', 'last_seen', 'language_code', 'is_premium')}),
+        ('Telegram', {'fields': ('telegram_id', 'photo_url', 'last_seen', 'language_code', 'is_premium', 'is_verified')}),
     )
     readonly_fields = ('last_seen',)
+
+
+@admin.register(InviteCode)
+class InviteCodeAdmin(admin.ModelAdmin):
+    list_display = (
+        'code',
+        'invite_url',
+        'created_by',
+        'is_active',
+        'expires_at',
+        'used_by',
+        'used_at',
+    )
+    list_filter = ('is_active', 'created_at', 'expires_at')
+    search_fields = ('code', 'created_by__username', 'used_by__username')
+    readonly_fields = ('code', 'invite_url', 'created_at', 'used_at', 'used_by')
+    fields = (
+        'code',
+        'invite_url',
+        'created_by',
+        'is_active',
+        'expires_at',
+        'used_by',
+        'used_at',
+        'created_at',
+    )
+
+    @admin.display(description='Ссылка приглашения')
+    def invite_url(self, obj: InviteCode | None):
+        if obj is None:
+            return 'Ссылка появится после сохранения приглашения.'
+        path = obj.get_absolute_url()
+        url = f'{settings.INVITE_BASE_URL}{path}' if settings.INVITE_BASE_URL else path
+        return format_html('<a href="{0}" target="_blank" rel="noopener">{0}</a>', url)
 
 
 @admin.register(Project)

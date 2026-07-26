@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+
+{% block title %}Активация приглашения — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+    <header class="page-header">
+        <div>
+            <h1 class="page-header__title">Активация приглашения</h1>
+            <p class="page-header__subtitle">Введите персональный код, чтобы получить доступ к КружокAPP.</p>
+        </div>
+    </header>
+
+    <section class="panel">
+        <div class="panel__body">
+            <form method="post" class="form-grid">
+                {% csrf_token %}
+                <div class="form-field form-field--full">
+                    <label for="{{ form.code.id_for_label }}">{{ form.code.label }}</label>
+                    {{ form.code }}
+                    {% if form.code.errors %}<div class="form-error">{{ form.code.errors|join:', ' }}</div>{% endif %}
+                </div>
+                <div class="form-actions form-field--full">
+                    <button type="submit" class="btn btn-primary">Активировать</button>
+                </div>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}

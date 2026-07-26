@@ -58,6 +58,21 @@ class DiscussionForm(forms.ModelForm):
         return cleaned_data
 
 
+class InviteCodeRedeemForm(forms.Form):
+    code = forms.CharField(
+        label='Код приглашения',
+        required=False,
+        strip=True,
+        widget=forms.TextInput(
+            attrs={
+                'class': 'w-full rounded-md border border-gray-300 px-3 py-2',
+                'autocomplete': 'off',
+                'placeholder': 'Вставьте код из приглашения',
+            }
+        ),
+    )
+
+
 class MessageForm(forms.ModelForm):
     class Meta:
         model = Message

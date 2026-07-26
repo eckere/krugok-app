@@ -13,6 +13,7 @@ from django.utils import timezone
 from .models import (
     Comment,
     Discussion,
+    InviteCode,
     Message,
     Notification,
     Project,
@@ -117,12 +118,104 @@ class TelegramAuthenticationTests(TestCase):
                 self.assertFalse('_auth_user_id' in self.client.session)
 
     @override_settings(DEBUG=True)
-    def test_dev_login_still_logs_in_and_redirects_home(self):
+    def test_dev_login_still_logs_in_but_requires_invitation(self):
         response = self.client.get(reverse('dev_login'))
 
-        self.assertRedirects(response, reverse('index'))
+        self.assertRedirects(
+            response,
+            reverse('index'),
+            fetch_redirect_response=False,
+        )
         user = get_user_model().objects.get(telegram_id=111222333)
         self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
+        self.assertFalse(user.is_verified)
+
+
+class InviteCodeTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='unverified_user',
+            is_verified=False,
+        )
+        self.client.force_login(self.user)
+
+    def test_unverified_user_is_redirected_to_invite_form(self):
+        response = self.client.get(reverse('discussion_list'))
+
+        self.assertRedirects(response, reverse('invite_redeem'))
+
+    def test_unverified_htmx_request_redirects_to_invite_form(self):
+        response = self.client.post(
+            reverse('discussion_create'),
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.headers['HX-Redirect'], reverse('invite_redeem'))
+
+    def test_valid_code_verifies_user_and_deactivates_code(self):
+        invite = InviteCode.objects.create()
+
+        response = self.client.post(reverse('invite_redeem'), {'code': invite.code})
+
+        self.assertRedirects(response, reverse('index'))
+        self.user.refresh_from_db()
+        invite.refresh_from_db()
+        self.assertTrue(self.user.is_verified)
+        self.assertEqual(invite.used_by, self.user)
+        self.assertIsNotNone(invite.used_at)
+        self.assertFalse(invite.is_active)
+
+    def test_invalid_or_expired_code_has_single_generic_error(self):
+        expired = InviteCode.objects.create(
+            expires_at=timezone.now() - timedelta(seconds=1)
+        )
+
+        for code in ('not-a-real-code', expired.code):
+            with self.subTest(code=code):
+                response = self.client.post(reverse('invite_redeem'), {'code': code})
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, 'Код недействителен.')
+                self.assertNotContains(response, 'истёк')
+                self.assertNotContains(response, 'использован')
+
+    def test_used_code_cannot_verify_another_user(self):
+        invite = InviteCode.objects.create()
+        first_user = get_user_model().objects.create_user(
+            username='first_invited_user',
+            is_verified=False,
+        )
+        self.client.force_login(first_user)
+        self.client.post(reverse('invite_redeem'), {'code': invite.code})
+
+        self.client.force_login(self.user)
+        response = self.client.post(reverse('invite_redeem'), {'code': invite.code})
+
+        self.assertContains(response, 'Код недействителен.')
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_verified)
+
+    def test_personal_link_remembers_code_before_authentication(self):
+        invite = InviteCode.objects.create()
+        self.client.logout()
+
+        response = self.client.get(reverse('invite_link', args=[invite.code]))
+
+        self.assertRedirects(response, reverse('index'))
+        self.assertEqual(self.client.session['pending_invite_code'], invite.code)
+
+    def test_verified_user_can_create_invitation(self):
+        self.user.is_verified = True
+        self.user.save(update_fields=['is_verified'])
+
+        response = self.client.post(reverse('invite_create'))
+
+        self.assertRedirects(response, reverse('invite_list'))
+        invite = InviteCode.objects.get(created_by=self.user)
+        self.assertTrue(invite.is_active)
+        response = self.client.get(reverse('invite_list'))
+        self.assertContains(response, invite.code)
+        self.assertContains(response, reverse('invite_link', args=[invite.code]))
 
 
 class DevAccountSwitcherTests(TestCase):
@@ -130,10 +223,12 @@ class DevAccountSwitcherTests(TestCase):
         self.current_user = get_user_model().objects.create_user(
             username='current',
             first_name='Текущий',
+            is_verified=True,
         )
         self.other_user = get_user_model().objects.create_user(
             username='other',
             first_name='Другой',
+            is_verified=True,
         )
         self.client.force_login(self.current_user)
 
@@ -171,7 +266,7 @@ class DevAccountSwitcherTests(TestCase):
 
 class StageAndProjectTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='tester', password='pass')
+        self.user = get_user_model().objects.create_user(username='tester', password='pass', is_verified=True)
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project 1', description='Test project', owner=self.user)
         ProjectMembership.objects.create(
@@ -236,7 +331,7 @@ class StageAndProjectTests(TestCase):
 
 class TaskCrudTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='tasker', password='pass')
+        self.user = get_user_model().objects.create_user(username='tasker', password='pass', is_verified=True)
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project Task', description='Test project', owner=self.user)
         ProjectMembership.objects.create(
@@ -293,7 +388,7 @@ class TaskCrudTests(TestCase):
 
 class ProjectCrudTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='owner', password='pass')
+        self.user = get_user_model().objects.create_user(username='owner', password='pass', is_verified=True)
         self.client.force_login(self.user)
 
     def test_create_project_sets_owner_and_member(self):
@@ -334,7 +429,7 @@ class ProjectCrudTests(TestCase):
 
 class ProjectMembershipTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='memberuser', password='pass')
+        self.user = get_user_model().objects.create_user(username='memberuser', password='pass', is_verified=True)
         self.client.force_login(self.user)
 
     def test_project_owner_membership_created_on_project_create(self):
@@ -366,9 +461,9 @@ class ProjectMembershipTests(TestCase):
 class ProjectMembershipCrudTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.owner = user_model.objects.create_user(username='membership_owner')
-        self.admin = user_model.objects.create_user(username='membership_admin')
-        self.candidate = user_model.objects.create_user(username='membership_candidate')
+        self.owner = user_model.objects.create_user(username='membership_owner', is_verified=True)
+        self.admin = user_model.objects.create_user(username='membership_admin', is_verified=True)
+        self.candidate = user_model.objects.create_user(username='membership_candidate', is_verified=True)
         self.project = Project.objects.create(name='Membership project', owner=self.owner)
         self.owner_membership = ProjectMembership.objects.create(
             project=self.project,
@@ -521,8 +616,8 @@ class ProjectMembershipCrudTests(TestCase):
 
 class PermissionTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='owner', password='pass')
-        self.other = get_user_model().objects.create_user(username='other', password='pass')
+        self.user = get_user_model().objects.create_user(username='owner', password='pass', is_verified=True)
+        self.other = get_user_model().objects.create_user(username='other', password='pass', is_verified=True)
         self.client.force_login(self.other)
         self.project = Project.objects.create(name='Protected', description='X', owner=self.user)
         ProjectMembership.objects.create(
@@ -560,10 +655,10 @@ class PermissionTests(TestCase):
 class AccessControlRegressionTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.owner = user_model.objects.create_user(username='access_owner')
-        self.admin = user_model.objects.create_user(username='access_admin')
-        self.member = user_model.objects.create_user(username='access_member')
-        self.outsider = user_model.objects.create_user(username='access_outsider')
+        self.owner = user_model.objects.create_user(username='access_owner', is_verified=True)
+        self.admin = user_model.objects.create_user(username='access_admin', is_verified=True)
+        self.member = user_model.objects.create_user(username='access_member', is_verified=True)
+        self.outsider = user_model.objects.create_user(username='access_outsider', is_verified=True)
 
         self.project = Project.objects.create(name='Visible project', owner=self.owner)
         ProjectMembership.objects.create(
@@ -785,9 +880,9 @@ class AccessControlRegressionTests(TestCase):
 class ProjectTaskWorkflowTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.owner = user_model.objects.create_user(username='workflow_owner')
-        self.member = user_model.objects.create_user(username='workflow_member')
-        self.outsider = user_model.objects.create_user(username='workflow_outsider')
+        self.owner = user_model.objects.create_user(username='workflow_owner', is_verified=True)
+        self.member = user_model.objects.create_user(username='workflow_member', is_verified=True)
+        self.outsider = user_model.objects.create_user(username='workflow_outsider', is_verified=True)
 
         self.project = Project.objects.create(name='Workflow project', owner=self.owner)
         ProjectMembership.objects.create(
@@ -979,7 +1074,7 @@ class ProjectTaskWorkflowTests(TestCase):
 
 class TaskDetailAndCommentsTests(TestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='commenter', password='pass')
+        self.user = get_user_model().objects.create_user(username='commenter', password='pass', is_verified=True)
         self.client.force_login(self.user)
         self.project = Project.objects.create(name='Project C', description='X', owner=self.user)
         ProjectMembership.objects.create(
@@ -996,7 +1091,7 @@ class TaskDetailAndCommentsTests(TestCase):
         self.assertContains(response, self.task.description)
 
     def test_task_detail_denies_non_member(self):
-        other = get_user_model().objects.create_user(username='other2', password='pass')
+        other = get_user_model().objects.create_user(username='other2', password='pass', is_verified=True)
         self.client.force_login(other)
         response = self.client.get(reverse('task_detail', args=[self.task.id]))
         self.assertIn(response.status_code, (403, 404))
@@ -1025,9 +1120,9 @@ class TaskDetailAndCommentsTests(TestCase):
 
 class DiscussionAndMessageTests(TestCase):
     def setUp(self):
-        self.user1 = get_user_model().objects.create_user(username='user1', first_name='Alice')
-        self.user2 = get_user_model().objects.create_user(username='user2', first_name='Bob')
-        self.user3 = get_user_model().objects.create_user(username='user3', first_name='Charlie')
+        self.user1 = get_user_model().objects.create_user(username='user1', first_name='Alice', is_verified=True)
+        self.user2 = get_user_model().objects.create_user(username='user2', first_name='Bob', is_verified=True)
+        self.user3 = get_user_model().objects.create_user(username='user3', first_name='Charlie', is_verified=True)
         self.task = Task.objects.create(title='Test Task', creator=self.user1)
 
         self.client.force_login(self.user1)
@@ -1155,8 +1250,8 @@ class DiscussionAndMessageTests(TestCase):
 class HtmxModalErrorRetargetTests(TestCase):
     def setUp(self):
         user_model = get_user_model()
-        self.owner = user_model.objects.create_user(username='htmx_owner')
-        self.candidate = user_model.objects.create_user(username='htmx_candidate')
+        self.owner = user_model.objects.create_user(username='htmx_owner', is_verified=True)
+        self.candidate = user_model.objects.create_user(username='htmx_candidate', is_verified=True)
         self.project = Project.objects.create(
             name='HTMX project',
             owner=self.owner,
@@ -1238,6 +1333,7 @@ class NotificationTests(TestCase):
             username='notification_user',
             telegram_id=987654321,
             first_name='Ирина',
+            is_verified=True,
         )
         self.client.force_login(self.user)
 

@@ -8,6 +8,10 @@ urlpatterns = [
     path('dev-login/', views.dev_login, name='dev_login'),
     path('dev-switch-account/<int:user_id>/', views.dev_switch_account, name='dev_switch_account'),
     path('auth/telegram/', views.auth_telegram, name='auth_telegram'),
+    path('invite/', views.invite_redeem, name='invite_redeem'),
+    path('invite/<str:code>/', views.invite_link, name='invite_link'),
+    path('invites/', views.invite_list, name='invite_list'),
+    path('invites/create/', views.invite_create, name='invite_create'),
 
     path('tasks/', views.task_list, name='task_list'),
     path('tasks/create/', views.task_create, name='task_create'),

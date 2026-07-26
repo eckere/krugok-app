@@ -1,9 +1,22 @@
+import secrets
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinLengthValidator
 from django.db import models
+from django.urls import reverse
 from django.utils import timezone
+
+
+def generate_invite_code() -> str:
+    """Возвращает достаточно длинный URL-безопасный одноразовый код."""
+    return secrets.token_urlsafe(24)
+
+
+def default_invite_expiry():
+    return timezone.now() + timedelta(days=7)
 
 
 class TelegramUser(AbstractUser):
@@ -12,6 +25,7 @@ class TelegramUser(AbstractUser):
     last_seen = models.DateTimeField(auto_now=True)
     language_code = models.CharField(max_length=12, blank=True, default='en')
     is_premium = models.BooleanField(default=False)
+    is_verified = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['first_name']
@@ -22,6 +36,58 @@ class TelegramUser(AbstractUser):
     @property
     def display_name(self):
         return self.get_full_name() or self.username
+
+
+class InviteCode(models.Model):
+    """Персональное одноразовое приглашение в приложение."""
+
+    code = models.CharField(
+        max_length=64,
+        unique=True,
+        default=generate_invite_code,
+        editable=False,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_invite_codes',
+    )
+    used_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='used_invite_codes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    used_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(
+        default=default_invite_expiry,
+        null=True,
+        blank=True,
+        help_text='По умолчанию приглашение действует 7 дней. Оставьте пустым для бессрочного.',
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.code
+
+    def get_absolute_url(self):
+        return reverse('invite_link', args=[self.code])
+
+    def is_redeemable(self, *, at=None) -> bool:
+        """Проверка состояния без раскрытия причины недействительности кода."""
+        at = at or timezone.now()
+        return (
+            self.is_active
+            and self.used_by_id is None
+            and (self.expires_at is None or self.expires_at > at)
+        )
 
 
 class Project(models.Model):

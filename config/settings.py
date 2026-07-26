@@ -32,6 +32,13 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',
 # Токен бота от @BotFather — нужен для проверки подписи initData (core/telegram_auth.py)
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 
+# Используется в Django admin для полной ссылки-приглашения. В production
+# берётся существующий APP_DOMAIN; локально остаётся относительная ссылка.
+_app_domain = os.environ.get('APP_DOMAIN', '').strip()
+INVITE_BASE_URL = os.environ.get('INVITE_BASE_URL', '').rstrip('/') or (
+    f'https://{_app_domain}' if _app_domain else ''
+)
+
 
 # Application definition
 

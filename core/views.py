@@ -6,9 +6,9 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth import login
-from django.contrib.auth.decorators import login_required
+from django.contrib.auth.decorators import login_required as django_login_required
 from django.core.exceptions import PermissionDenied
-from django.db import connection, models
+from django.db import connection, models, transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -21,6 +21,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 from .forms import (
     CommentForm,
     DiscussionForm,
+    InviteCodeRedeemForm,
     MessageForm,
     ProjectForm,
     ProjectMembershipCreateForm,
@@ -31,6 +32,7 @@ from .forms import (
 from .models import (
     Comment,
     Discussion,
+    InviteCode,
     Message,
     Notification,
     Project,
@@ -39,6 +41,7 @@ from .models import (
     Task,
     TelegramUser,
 )
+from .decorators import require_verified_user, verified_login_required
 from .permissions import (
     get_accessible_projects,
     get_accessible_tasks,
@@ -51,6 +54,11 @@ from .telegram_auth import InitDataValidationError, validate_init_data
 from .telegram_notifications import notify
 
 logger = logging.getLogger(__name__)
+
+# Все ранее существовавшие прикладные view уже были помечены
+# @login_required. Сохраняем это объявление, но добавляем к нему проверку
+# приглашения. Исключение ниже — только форма активации инвайта.
+login_required = verified_login_required
 
 
 def healthcheck(request):
@@ -71,6 +79,7 @@ def _close_modal(response, modal_id):
 
 
 @ensure_csrf_cookie
+@require_verified_user
 def index(request):
     context = {}
     if request.user.is_authenticated:
@@ -113,7 +122,7 @@ def dev_login(request):
     return redirect('index')
 
 
-@login_required
+@verified_login_required
 @require_POST
 def dev_switch_account(request, user_id):
     """Переключает локальную сессию между тестовыми пользователями."""
@@ -161,6 +170,89 @@ def auth_telegram(request):
     )
     login(request, user)
     return JsonResponse({'success': True, 'redirect_url': reverse('index')})
+
+
+@django_login_required
+@require_http_methods(['GET', 'POST'])
+def invite_redeem(request):
+    """Позволяет уже HMAC-авторизованному пользователю активировать инвайт."""
+    if request.user.is_verified:
+        return redirect('index')
+
+    if request.method == 'POST':
+        form = InviteCodeRedeemForm(request.POST)
+        if form.is_valid():
+            code = form.cleaned_data['code']
+            now = timezone.now()
+            with transaction.atomic():
+                invite = (
+                    InviteCode.objects.select_for_update()
+                    .filter(code=code, is_active=True, used_by__isnull=True)
+                    .filter(
+                        models.Q(expires_at__isnull=True)
+                        | models.Q(expires_at__gt=now)
+                    )
+                    .first()
+                )
+                if invite is not None:
+                    TelegramUser.objects.filter(pk=request.user.pk).update(
+                        is_verified=True
+                    )
+                    InviteCode.objects.filter(pk=invite.pk).update(
+                        used_by=request.user,
+                        used_at=now,
+                        is_active=False,
+                    )
+                    request.user.is_verified = True
+                    request.session.pop('pending_invite_code', None)
+                    return redirect('index')
+
+        # Одна и та же формулировка для несуществующего, истёкшего и уже
+        # использованного кода не раскрывает состояние приглашения.
+        form = InviteCodeRedeemForm({'code': request.POST.get('code', '').strip()})
+        form.is_valid()
+        form.add_error('code', 'Код недействителен.')
+    else:
+        form = InviteCodeRedeemForm(
+            initial={'code': request.session.get('pending_invite_code', '')}
+        )
+
+    return render(request, 'core/invites/redeem.html', {'form': form})
+
+
+def invite_link(request, code):
+    """Запоминает код из персональной ссылки до Telegram HMAC-входа."""
+    request.session['pending_invite_code'] = code
+    return redirect('invite_redeem' if request.user.is_authenticated else 'index')
+
+
+@verified_login_required
+def invite_list(request):
+    now = timezone.now()
+    invites = (
+        InviteCode.objects.filter(
+            created_by=request.user,
+            is_active=True,
+            used_by__isnull=True,
+        )
+        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        .order_by('-created_at')
+    )
+    invite_rows = [
+        {
+            'invite': invite,
+            'url': request.build_absolute_uri(invite.get_absolute_url()),
+        }
+        for invite in invites
+    ]
+    return render(request, 'core/invites/list.html', {'invite_rows': invite_rows})
+
+
+@verified_login_required
+@require_POST
+def invite_create(request):
+    InviteCode.objects.create(created_by=request.user)
+    return redirect('invite_list')
 
 
 # ---------------------------------------------------------------------------

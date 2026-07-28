@@ -16,7 +16,9 @@
    that may enter without an invitation to `TELEGRAM_ALLOWED_IDS` (comma-separated).
    To enable Telegram login in a normal browser, set `TELEGRAM_BOT_USERNAME`
    and register `https://<APP_DOMAIN>` for that bot with @BotFather using
-   `/setdomain`.
+   `/setdomain`. In @BotFather, also enable the bot's Main Mini App with
+   `https://<APP_DOMAIN>/` as its URL; invitation links use its signed
+   `startapp` parameter.
 4. Start the stack:
 
    ```sh

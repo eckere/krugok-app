@@ -47,8 +47,10 @@ class InviteCodeAdmin(admin.ModelAdmin):
     def invite_url(self, obj: InviteCode | None):
         if obj is None:
             return 'Ссылка появится после сохранения приглашения.'
-        path = obj.get_absolute_url()
-        url = f'{settings.INVITE_BASE_URL}{path}' if settings.INVITE_BASE_URL else path
+        url = obj.get_telegram_url()
+        if not url:
+            path = obj.get_absolute_url()
+            url = f'{settings.INVITE_BASE_URL}{path}' if settings.INVITE_BASE_URL else path
         return format_html('<a href="{0}" target="_blank" rel="noopener">{0}</a>', url)
 
 

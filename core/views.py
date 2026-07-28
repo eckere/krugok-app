@@ -54,6 +54,7 @@ from .permissions import (
 from .telegram_auth import (
     InitDataValidationError,
     LoginWidgetValidationError,
+    extract_invite_code,
     validate_init_data,
     validate_login_widget_data,
 )
@@ -162,7 +163,15 @@ def auth_telegram(request):
         # Причину держим только в серверном логе: она не должна попадать в UI.
         return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
-    return _login_telegram_user(request, tg_user)
+    invite_code = extract_invite_code(init_data)
+    if invite_code:
+        request.session['pending_invite_code'] = invite_code
+
+    return _login_telegram_user(
+        request,
+        tg_user,
+        redirect_url=reverse('invite_redeem') if invite_code else reverse('index'),
+    )
 
 
 @require_POST
@@ -183,7 +192,7 @@ def auth_telegram_widget(request):
     return _login_telegram_user(request, tg_user)
 
 
-def _login_telegram_user(request, tg_user):
+def _login_telegram_user(request, tg_user, *, redirect_url=None):
     """Обновляет профиль и создаёт Django-сессию после проверки Telegram."""
     telegram_id = tg_user['id']
     username = tg_user.get('username') or f'tg_{telegram_id}'
@@ -198,7 +207,9 @@ def _login_telegram_user(request, tg_user):
         },
     )
     login(request, user)
-    return JsonResponse({'success': True, 'redirect_url': reverse('index')})
+    return JsonResponse(
+        {'success': True, 'redirect_url': redirect_url or reverse('index')}
+    )
 
 
 @django_login_required
@@ -270,7 +281,10 @@ def invite_list(request):
     invite_rows = [
         {
             'invite': invite,
-            'url': request.build_absolute_uri(invite.get_absolute_url()),
+            'url': (
+                invite.get_telegram_url()
+                or request.build_absolute_uri(invite.get_absolute_url())
+            ),
         }
         for invite in invites
     ]

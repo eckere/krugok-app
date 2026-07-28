@@ -120,6 +120,55 @@ class TelegramAuthenticationTests(TestCase):
                 self.assertEqual(response.status_code, 401)
                 self.assertFalse('_auth_user_id' in self.client.session)
 
+    @patch('core.views.validate_init_data')
+    def test_startapp_invite_is_saved_and_redirects_to_redeem(
+        self, validate_init_data
+    ):
+        invite = InviteCode.objects.create()
+        validate_init_data.return_value = {
+            'id': 246813579,
+            'username': 'invited_user',
+            'first_name': 'Гость',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps(
+                {
+                    'init_data': (
+                        f'auth_date=1&start_param=invite_{invite.code}'
+                    )
+                }
+            ),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['redirect_url'], reverse('invite_redeem'))
+        self.assertEqual(
+            self.client.session['pending_invite_code'],
+            invite.code,
+        )
+
+    @patch('core.views.validate_init_data')
+    def test_unrecognized_startapp_parameter_is_ignored(self, validate_init_data):
+        validate_init_data.return_value = {
+            'id': 135792468,
+            'username': 'regular_user',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps(
+                {'init_data': 'auth_date=1&start_param=unexpected_action'}
+            ),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['redirect_url'], reverse('index'))
+        self.assertNotIn('pending_invite_code', self.client.session)
+
     @override_settings(TELEGRAM_ALLOWED_IDS=frozenset({987654321}))
     @patch('core.views.validate_init_data')
     def test_allowlisted_telegram_id_has_access_without_invite(self, validate_init_data):
@@ -207,6 +256,20 @@ class InviteCodeTests(TestCase):
 
         self.assertRedirects(response, reverse('invite_redeem'))
 
+    def test_existing_session_remembers_startapp_invite_before_redirect(self):
+        invite = InviteCode.objects.create()
+
+        response = self.client.get(
+            reverse('index'),
+            {'tgWebAppStartParam': f'invite_{invite.code}'},
+        )
+
+        self.assertRedirects(response, reverse('invite_redeem'))
+        self.assertEqual(
+            self.client.session['pending_invite_code'],
+            invite.code,
+        )
+
     def test_unverified_htmx_request_redirects_to_invite_form(self):
         response = self.client.post(
             reverse('discussion_create'),
@@ -267,6 +330,7 @@ class InviteCodeTests(TestCase):
         self.assertRedirects(response, reverse('index'))
         self.assertEqual(self.client.session['pending_invite_code'], invite.code)
 
+    @override_settings(TELEGRAM_BOT_USERNAME='KruzhokTeamBot')
     def test_verified_user_can_create_invitation(self):
         self.user.is_verified = True
         self.user.save(update_fields=['is_verified'])
@@ -278,7 +342,23 @@ class InviteCodeTests(TestCase):
         self.assertTrue(invite.is_active)
         response = self.client.get(reverse('invite_list'))
         self.assertContains(response, invite.code)
-        self.assertContains(response, reverse('invite_link', args=[invite.code]))
+        self.assertContains(
+            response,
+            f'https://t.me/KruzhokTeamBot?startapp=invite_{invite.code}',
+        )
+
+    @override_settings(TELEGRAM_BOT_USERNAME='')
+    def test_invite_link_falls_back_to_web_url_without_bot_username(self):
+        self.user.is_verified = True
+        self.user.save(update_fields=['is_verified'])
+        invite = InviteCode.objects.create(created_by=self.user)
+
+        response = self.client.get(reverse('invite_list'))
+
+        self.assertContains(
+            response,
+            f'http://testserver{reverse("invite_link", args=[invite.code])}',
+        )
 
 
 class DevAccountSwitcherTests(TestCase):

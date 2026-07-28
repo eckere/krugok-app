@@ -4,7 +4,12 @@ import time
 
 from django.test import SimpleTestCase
 
-from .telegram_auth import LoginWidgetValidationError, validate_login_widget_data
+from .telegram_auth import (
+    LoginWidgetValidationError,
+    extract_invite_code,
+    extract_invite_code_from_start_param,
+    validate_login_widget_data,
+)
 
 
 class TelegramLoginWidgetValidationTests(SimpleTestCase):
@@ -46,3 +51,28 @@ class TelegramLoginWidgetValidationTests(SimpleTestCase):
 
         with self.assertRaises(LoginWidgetValidationError):
             validate_login_widget_data(data, bot_token=self.bot_token)
+
+
+class TelegramStartParamTests(SimpleTestCase):
+    def test_start_param_is_parsed(self):
+        self.assertEqual(
+            extract_invite_code_from_start_param('invite_abcDEF123_-'),
+            'abcDEF123_-',
+        )
+
+    def test_invite_code_is_extracted(self):
+        self.assertEqual(
+            extract_invite_code(
+                'auth_date=1&start_param=invite_abcDEF123_-&user=%7B%7D'
+            ),
+            'abcDEF123_-',
+        )
+
+    def test_unrecognized_or_unsafe_value_is_ignored(self):
+        for init_data in (
+            'start_param=other_abc',
+            'start_param=invite_abc%2Fdef',
+            'start_param=invite_',
+        ):
+            with self.subTest(init_data=init_data):
+                self.assertIsNone(extract_invite_code(init_data))

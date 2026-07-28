@@ -5,6 +5,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 
 from .access import user_has_access
+from .telegram_auth import extract_invite_code_from_start_param
 
 
 def require_verified_user(view_func):
@@ -16,6 +17,15 @@ def require_verified_user(view_func):
         # JavaScript сначала отправит initData в неизменённый auth_telegram.
         if not request.user.is_authenticated or user_has_access(request.user):
             return view_func(request, *args, **kwargs)
+
+        # Telegram добавляет startapp в URL Mini App также как
+        # tgWebAppStartParam. Здесь код только сохраняется для формы:
+        # право доступа всё равно выдаст POST invite_redeem после проверки БД.
+        invite_code = extract_invite_code_from_start_param(
+            request.GET.get('tgWebAppStartParam', '')
+        )
+        if invite_code:
+            request.session['pending_invite_code'] = invite_code
 
         invite_url = reverse('invite_redeem')
         if request.headers.get('HX-Request') == 'true':

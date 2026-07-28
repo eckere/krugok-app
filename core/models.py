@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
@@ -17,6 +18,9 @@ def generate_invite_code() -> str:
 
 def default_invite_expiry():
     return timezone.now() + timedelta(days=7)
+
+
+INVITE_START_PARAM_PREFIX = 'invite_'
 
 
 class TelegramUser(AbstractUser):
@@ -79,6 +83,18 @@ class InviteCode(models.Model):
 
     def get_absolute_url(self):
         return reverse('invite_link', args=[self.code])
+
+    def get_telegram_start_param(self) -> str:
+        """Параметр запуска Main Mini App для этого приглашения."""
+        return f'{INVITE_START_PARAM_PREFIX}{self.code}'
+
+    def get_telegram_url(self) -> str:
+        """Deep-link, открывающий приглашение сразу в Telegram Mini App."""
+        bot_username = settings.TELEGRAM_BOT_USERNAME
+        if not bot_username:
+            return ''
+        query = urlencode({'startapp': self.get_telegram_start_param()})
+        return f'https://t.me/{bot_username}?{query}'
 
     def is_redeemable(self, *, at=None) -> bool:
         """Проверка состояния без раскрытия причины недействительности кода."""

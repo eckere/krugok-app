@@ -17,6 +17,7 @@ https://core.telegram.org/bots/webapps#validating-data-received-via-the-web-app
 import hashlib
 import hmac
 import json
+import re
 import time
 from collections.abc import Mapping
 from urllib.parse import parse_qsl
@@ -25,6 +26,7 @@ from django.conf import settings
 
 # Старше этого — считаем initData протухшим и отклоняем (защита от replay).
 MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60
+INVITE_START_PARAM_RE = re.compile(r'^invite_([A-Za-z0-9_-]{1,64})$')
 
 
 class InitDataValidationError(Exception):
@@ -96,6 +98,18 @@ def validate_init_data(init_data: str, bot_token: str | None = None) -> dict:
         raise InitDataValidationError('В данных пользователя отсутствует id')
 
     return user_data
+
+
+def extract_invite_code_from_start_param(start_param: str) -> str | None:
+    """Проверяет формат Telegram startapp-параметра приглашения."""
+    match = INVITE_START_PARAM_RE.fullmatch(start_param)
+    return match.group(1) if match else None
+
+
+def extract_invite_code(init_data: str) -> str | None:
+    """Извлекает код приглашения из уже проверенного Telegram initData."""
+    data = dict(parse_qsl(init_data, keep_blank_values=True))
+    return extract_invite_code_from_start_param(data.get('start_param', ''))
 
 
 def validate_login_widget_data(

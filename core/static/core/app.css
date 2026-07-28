@@ -3,13 +3,22 @@
   --surface: var(--tg-theme-secondary-bg-color, #ffffff);
   --surface-soft: var(--tg-theme-section-bg-color, #f7f8fa);
   --surface-strong: #f1f3f6;
+  --surface-raised: #ffffff;
+  --input-bg: #ffffff;
+  --control-hover: var(--surface-soft);
   --sidebar: #0f172a;
   --sidebar-active: rgba(255, 255, 255, 0.12);
   --text: var(--tg-theme-text-color, #2d2d2d);
   --muted: var(--tg-theme-hint-color, #6b6b6b);
   --subtle: #a7a7a7;
   --border: #e4e4e4;
+  --border-strong: #d2d2d2;
+  --empty-border: #d7d7d7;
+  --focus-border: #9e9e9e;
+  --focus-ring: rgba(45, 45, 45, 0.07);
   --primary: var(--tg-theme-button-color, #2d2d2d);
+  --primary-fg: #ffffff;
+  --danger-hover: #ffe4e1;
   --green: #039855;
   --green-bg: #ecfdf3;
   --amber: #e66b00;
@@ -22,6 +31,38 @@
   --radius-md: 12px;
   --radius-lg: 14px;
   --sidebar-width: 240px;
+}
+
+/* Telegram passes colors as custom properties, but not every theme gives
+   usable foreground/background pairs. Keep all controls on dark surfaces
+   when the client is dark, and let the script choose a contrasting primary
+   foreground for custom Telegram button colors. */
+.tg-theme-dark {
+  color-scheme: dark;
+  --app-bg: var(--tg-theme-bg-color, #17212b);
+  --surface: var(--tg-theme-secondary-bg-color, #1f2937);
+  --surface-soft: var(--tg-theme-section-bg-color, #243140);
+  --surface-strong: #2d3a4a;
+  --surface-raised: #273545;
+  --input-bg: #202c3a;
+  --control-hover: var(--surface-strong);
+  --text: var(--tg-theme-text-color, #f4f7fb);
+  --muted: var(--tg-theme-hint-color, #a9b5c4);
+  --subtle: #8f9cac;
+  --border: rgba(255, 255, 255, 0.14);
+  --border-strong: rgba(255, 255, 255, 0.26);
+  --empty-border: rgba(255, 255, 255, 0.28);
+  --focus-border: rgba(255, 255, 255, 0.56);
+  --focus-ring: rgba(255, 255, 255, 0.12);
+  --green: #4fd69a;
+  --green-bg: #123d30;
+  --amber: #ffb454;
+  --amber-bg: #493617;
+  --red: #ff958c;
+  --red-bg: #4c292d;
+  --blue: #8dbdff;
+  --blue-bg: #203b63;
+  --danger-hover: #613037;
 }
 
 * {
@@ -217,7 +258,7 @@ a {
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: 13px;
-  background: #fff;
+  background: var(--surface-raised);
   padding: 7px;
   color: var(--text);
   box-shadow: 0 16px 42px rgba(15, 23, 42, 0.2);
@@ -255,7 +296,7 @@ a {
 }
 
 .account-option.is-current {
-  background: var(--surface-soft);
+  background: var(--control-hover);
   cursor: default;
 }
 
@@ -382,21 +423,22 @@ a {
 
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-fg);
 }
 
 .btn-primary:hover {
-  background: #171717;
+  background: var(--primary);
+  filter: brightness(0.94);
 }
 
 .btn-secondary {
   border-color: var(--border);
-  background: #fff;
+  background: var(--surface-raised);
   color: var(--text);
 }
 
 .btn-secondary:hover {
-  background: var(--surface-soft);
+  background: var(--control-hover);
 }
 
 .btn-ghost {
@@ -415,7 +457,7 @@ a {
 }
 
 .btn-danger:hover {
-  background: #ffe4e1;
+  background: var(--danger-hover);
 }
 
 .btn-sm {
@@ -570,7 +612,7 @@ a {
 
 .segmented__item.is-active {
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-fg);
 }
 
 .chip {
@@ -612,13 +654,13 @@ a {
   gap: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: #fff;
+  background: var(--surface-raised);
   padding: 15px 16px;
   transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .entity-card:hover {
-  border-color: #d2d2d2;
+  border-color: var(--border-strong);
 }
 
 .entity-card__content {
@@ -704,7 +746,7 @@ a {
 }
 
 .empty-state {
-  border: 1px dashed #d7d7d7;
+  border: 1px dashed var(--empty-border);
   border-radius: var(--radius-md);
   background: var(--surface-soft);
   padding: 28px 18px;
@@ -1052,7 +1094,7 @@ a {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--surface-raised);
 }
 
 .chat__header {
@@ -1091,7 +1133,7 @@ a {
 .chat__composer {
   padding: 14px;
   border-top: 1px solid var(--border);
-  background: #fff;
+  background: var(--surface-raised);
 }
 
 .chat__composer form {
@@ -1128,7 +1170,7 @@ a {
   flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
-  background: #e2e5e9;
+  background: var(--surface-strong);
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
@@ -1141,7 +1183,7 @@ a {
 .message__bubble {
   border: 1px solid var(--border);
   border-radius: 13px 13px 13px 4px;
-  background: #fff;
+  background: var(--surface-raised);
   padding: 9px 11px;
   font-size: 13px;
 }
@@ -1150,7 +1192,7 @@ a {
   border-color: var(--primary);
   border-radius: 13px 13px 4px;
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-fg);
 }
 
 .message__meta {
@@ -1168,7 +1210,7 @@ a {
   margin: 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: #fff;
+  background: var(--surface-raised);
   padding: 24px;
 }
 
@@ -1211,7 +1253,7 @@ a {
   border: 1px solid var(--border) !important;
   border-radius: 10px !important;
   outline: none;
-  background: #fff !important;
+  background: var(--input-bg) !important;
   color: var(--text) !important;
   box-shadow: none !important;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
@@ -1239,8 +1281,8 @@ a {
 .modal-panel select:focus,
 .modal-panel textarea:focus,
 .chat__composer textarea:focus {
-  border-color: #9e9e9e !important;
-  box-shadow: 0 0 0 3px rgba(45, 45, 45, 0.07) !important;
+  border-color: var(--focus-border) !important;
+  box-shadow: 0 0 0 3px var(--focus-ring) !important;
 }
 
 .form-error {
@@ -1310,7 +1352,7 @@ a {
   max-height: calc(100vh - 44px);
   overflow-y: auto;
   border-radius: 18px;
-  background: #fff;
+  background: var(--surface-raised);
   padding: 26px 30px;
   box-shadow: 0 18px 55px rgba(15, 23, 42, 0.18);
 }
@@ -1371,7 +1413,7 @@ a {
   width: min(420px, 100%);
   border: 1px solid var(--border);
   border-radius: 18px;
-  background: #fff;
+  background: var(--surface-raised);
   padding: 32px;
 }
 
@@ -1396,15 +1438,6 @@ a {
 .auth-copy {
   margin: 0 0 22px;
   color: var(--muted);
-}
-
-.tg-theme-active .btn-primary {
-  color: var(--tg-theme-button-text-color, #fff);
-}
-
-.tg-theme-active .btn-primary:hover {
-  background: var(--primary);
-  filter: brightness(0.94);
 }
 
 .telegram-auth-overlay {
@@ -1696,7 +1729,7 @@ a {
     position: sticky;
     bottom: 0;
     padding-top: 12px;
-    background: #fff;
+    background: var(--surface-raised);
   }
 
   .mobile-only {

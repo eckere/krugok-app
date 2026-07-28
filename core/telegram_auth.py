@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Mapping
 from urllib.parse import parse_qsl
 
 from django.conf import settings
@@ -28,6 +29,10 @@ MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60
 
 class InitDataValidationError(Exception):
     """Подпись initData неверна, данные повреждены или устарели."""
+
+
+class LoginWidgetValidationError(Exception):
+    """Данные обычного Telegram Login Widget нельзя считать подлинными."""
 
 
 def validate_init_data(init_data: str, bot_token: str | None = None) -> dict:
@@ -91,3 +96,60 @@ def validate_init_data(init_data: str, bot_token: str | None = None) -> dict:
         raise InitDataValidationError('В данных пользователя отсутствует id')
 
     return user_data
+
+
+def validate_login_widget_data(
+    auth_data: Mapping[str, object], bot_token: str | None = None
+) -> dict:
+    """Проверяет HMAC-подпись данных из Telegram Login Widget.
+
+    Для виджета Telegram использует другой ключ, чем Mini App: SHA-256 от
+    токена бота. Нельзя переиспользовать ``validate_init_data`` — иначе
+    правильный ответ виджета будет отклонён, а неверная схема проверки может
+    допустить поддельный вход.
+    """
+    bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
+
+    if not isinstance(auth_data, Mapping):
+        raise LoginWidgetValidationError('Данные виджета отсутствуют')
+
+    received_hash = auth_data.get('hash')
+    if not isinstance(received_hash, str) or not received_hash:
+        raise LoginWidgetValidationError('В данных виджета отсутствует hash')
+
+    try:
+        telegram_id = int(auth_data['id'])
+        auth_date = int(auth_data['auth_date'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise LoginWidgetValidationError('В данных виджета нет корректных id или auth_date') from exc
+    if telegram_id <= 0:
+        raise LoginWidgetValidationError('Некорректный Telegram ID')
+
+    signed_data = {
+        str(key): str(value)
+        for key, value in auth_data.items()
+        if key != 'hash'
+    }
+    data_check_string = '\n'.join(
+        f'{key}={value}' for key, value in sorted(signed_data.items())
+    )
+    secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
+    expected_hash = hmac.new(
+        key=secret_key,
+        msg=data_check_string.encode('utf-8'),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected_hash, received_hash):
+        raise LoginWidgetValidationError('Неверная подпись данных виджета')
+
+    now = time.time()
+    if auth_date > now + 60 or now - auth_date > MAX_INIT_DATA_AGE_SECONDS:
+        raise LoginWidgetValidationError('Данные виджета устарели')
+
+    return {
+        'id': telegram_id,
+        'username': str(auth_data.get('username') or ''),
+        'first_name': str(auth_data.get('first_name') or ''),
+        'last_name': str(auth_data.get('last_name') or ''),
+        'photo_url': str(auth_data.get('photo_url') or '') or None,
+    }

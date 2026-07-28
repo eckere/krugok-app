@@ -98,7 +98,17 @@
         <div class="auth-logo">К</div>
         <h1 class="auth-title">КружокAPP</h1>
         <p class="auth-copy">Задачи, проекты и командные обсуждения в одном месте.</p>
+        {% if telegram_login_enabled %}
+            <div id="telegram-login-widget" aria-label="Войти через Telegram"></div>
+            <p id="telegram-browser-auth-error" class="form-error" hidden>
+                Не удалось войти через Telegram. Попробуйте ещё раз.
+            </p>
+        {% else %}
+            <p class="auth-copy">Откройте приложение через Telegram, чтобы войти.</p>
+        {% endif %}
+        {% if dev_login_enabled %}
         <a href="{% url 'dev_login' %}" class="btn btn-primary">Войти в тестовом режиме</a>
+        {% endif %}
     </section>
 </div>
 {% endif %}

@@ -18,6 +18,7 @@ from django.utils.html import escape
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
+from .access import user_has_access
 from .forms import (
     CommentForm,
     DiscussionForm,
@@ -50,7 +51,12 @@ from .permissions import (
     get_stage_or_403,
     get_task_or_403,
 )
-from .telegram_auth import InitDataValidationError, validate_init_data
+from .telegram_auth import (
+    InitDataValidationError,
+    LoginWidgetValidationError,
+    validate_init_data,
+    validate_login_widget_data,
+)
 from .telegram_notifications import notify
 
 logger = logging.getLogger(__name__)
@@ -156,6 +162,29 @@ def auth_telegram(request):
         # Причину держим только в серверном логе: она не должна попадать в UI.
         return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
+    return _login_telegram_user(request, tg_user)
+
+
+@require_POST
+def auth_telegram_widget(request):
+    """Принимает подписанный ответ Telegram Login Widget из обычного браузера."""
+    try:
+        payload = json.loads(request.body or '{}')
+    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+        payload = {}
+
+    auth_data = payload.get('auth_data', {}) if isinstance(payload, dict) else {}
+    try:
+        tg_user = validate_login_widget_data(auth_data)
+    except LoginWidgetValidationError as exc:
+        logger.warning('Отклонена попытка входа через Telegram Login Widget: %s', exc)
+        return JsonResponse({'error': 'Не удалось войти'}, status=401)
+
+    return _login_telegram_user(request, tg_user)
+
+
+def _login_telegram_user(request, tg_user):
+    """Обновляет профиль и создаёт Django-сессию после проверки Telegram."""
     telegram_id = tg_user['id']
     username = tg_user.get('username') or f'tg_{telegram_id}'
 
@@ -176,7 +205,7 @@ def auth_telegram(request):
 @require_http_methods(['GET', 'POST'])
 def invite_redeem(request):
     """Позволяет уже HMAC-авторизованному пользователю активировать инвайт."""
-    if request.user.is_verified:
+    if user_has_access(request.user):
         return redirect('index')
 
     if request.method == 'POST':

@@ -12,7 +12,11 @@
 1. Copy or clone the repository to `/opt/krugok-app`.
 2. Copy `.env.production.example` to `.env.production`.
 3. Replace every placeholder and set the real domain in `APP_DOMAIN`,
-   `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`.
+   `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`. Add the personal Telegram IDs
+   that may enter without an invitation to `TELEGRAM_ALLOWED_IDS` (comma-separated).
+   To enable Telegram login in a normal browser, set `TELEGRAM_BOT_USERNAME`
+   and register `https://<APP_DOMAIN>` for that bot with @BotFather using
+   `/setdomain`.
 4. Start the stack:
 
    ```sh

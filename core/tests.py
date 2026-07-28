@@ -21,7 +21,10 @@ from .models import (
     Stage,
     Task,
 )
-from .telegram_auth import InitDataValidationError
+from .telegram_auth import (
+    InitDataValidationError,
+    LoginWidgetValidationError,
+)
 from .telegram_notifications import notify
 
 
@@ -116,6 +119,66 @@ class TelegramAuthenticationTests(TestCase):
                 )
                 self.assertEqual(response.status_code, 401)
                 self.assertFalse('_auth_user_id' in self.client.session)
+
+    @override_settings(TELEGRAM_ALLOWED_IDS=frozenset({987654321}))
+    @patch('core.views.validate_init_data')
+    def test_allowlisted_telegram_id_has_access_without_invite(self, validate_init_data):
+        validate_init_data.return_value = {
+            'id': 987654321,
+            'username': 'allowed_user',
+            'first_name': 'Разрешённый',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps({'init_data': 'valid-init-data'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        user = get_user_model().objects.get(telegram_id=987654321)
+        self.assertFalse(user.is_verified)
+        self.assertEqual(self.client.get(reverse('index')).status_code, 200)
+        self.assertRedirects(
+            self.client.get(reverse('invite_redeem')),
+            reverse('index'),
+        )
+
+    @patch('core.views.validate_login_widget_data')
+    def test_login_widget_creates_user_and_logs_in(self, validate_login_widget_data):
+        validate_login_widget_data.return_value = {
+            'id': 765432198,
+            'username': 'widget_user',
+            'first_name': 'Павел',
+            'last_name': 'Виджетов',
+            'photo_url': 'https://example.com/widget-avatar.jpg',
+        }
+
+        response = self.client.post(
+            reverse('auth_telegram_widget'),
+            data=json.dumps({'auth_data': {'id': 765432198}}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'success': True, 'redirect_url': reverse('index')})
+        user = get_user_model().objects.get(telegram_id=765432198)
+        self.assertEqual(user.username, 'widget_user')
+        self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
+
+    @patch('core.views.validate_login_widget_data')
+    def test_invalid_login_widget_data_returns_401(self, validate_login_widget_data):
+        validate_login_widget_data.side_effect = LoginWidgetValidationError('Неверная подпись')
+
+        response = self.client.post(
+            reverse('auth_telegram_widget'),
+            data=json.dumps({'auth_data': {'id': 765432198}}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {'error': 'Не удалось войти'})
+        self.assertFalse('_auth_user_id' in self.client.session)
 
     @override_settings(DEBUG=True)
     def test_dev_login_still_logs_in_but_requires_invitation(self):

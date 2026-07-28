@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,6 +32,39 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',
 
 # Токен бота от @BotFather — нужен для проверки подписи initData (core/telegram_auth.py)
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
+
+
+def _parse_telegram_allowed_ids(raw_value: str) -> frozenset[int]:
+    """Читает список личных Telegram ID из .env без неявных допущений."""
+    allowed_ids = set()
+    for raw_id in raw_value.split(','):
+        raw_id = raw_id.strip()
+        if not raw_id:
+            continue
+        try:
+            telegram_id = int(raw_id)
+        except ValueError as exc:
+            raise ImproperlyConfigured(
+                'TELEGRAM_ALLOWED_IDS должен содержать только числовые Telegram ID, '
+                'разделённые запятыми.'
+            ) from exc
+        if telegram_id <= 0:
+            raise ImproperlyConfigured(
+                'TELEGRAM_ALLOWED_IDS должен содержать только положительные личные Telegram ID.'
+            )
+        allowed_ids.add(telegram_id)
+    return frozenset(allowed_ids)
+
+
+# Указанные здесь пользователи получают доступ сразу после Telegram-входа.
+# Остальные смогут получить его только через одноразовое приглашение.
+TELEGRAM_ALLOWED_IDS = _parse_telegram_allowed_ids(
+    os.environ.get('TELEGRAM_ALLOWED_IDS', '')
+)
+
+# Username бота (без @) нужен только для виджета входа в обычном браузере.
+# Внутри Telegram Mini App используется initData и этот параметр не требуется.
+TELEGRAM_BOT_USERNAME = os.environ.get('TELEGRAM_BOT_USERNAME', '').strip().lstrip('@')
 
 # Используется в Django admin для полной ссылки-приглашения. В production
 # берётся существующий APP_DOMAIN; локально остаётся относительная ссылка.
@@ -87,6 +121,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'core.context_processors.dev_accounts',
+                'core.context_processors.telegram_login',
             ],
         },
     },

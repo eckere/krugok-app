@@ -3,7 +3,13 @@
   <div class="entity-card__content">
     <div class="entity-card__title-row">
       <div class="project-card__mark"></div>
-      <h3 class="entity-card__title"><a href="{% url 'project_detail' project.id %}">{{ project.name }}</a></h3>
+      <h3 class="entity-card__title">
+        {% if project.is_archived %}
+          {{ project.name }}
+        {% else %}
+          <a href="{% url 'project_detail' project.id %}">{{ project.name }}</a>
+        {% endif %}
+      </h3>
     </div>
     {% if project.description %}<div class="entity-card__description">{{ project.description }}</div>{% endif %}
     <div class="entity-card__meta">
@@ -12,7 +18,7 @@
   </div>
   {% if not compact %}
     <div class="entity-card__actions">
-      {% if project|can_admin_project:user %}
+      {% if not project.is_archived and project|can_admin_project:user %}
       <button type="button" hx-get="{% url 'project_update' project.id %}" hx-target="#project-modal" hx-swap="innerHTML" class="btn btn-secondary btn-sm">Изменить</button>
       <button type="button"
               hx-post="{% url 'project_archive' project.id %}"
@@ -22,8 +28,14 @@
         В архив
       </button>
       {% endif %}
-      {% if project|can_own_project:user %}
-      <button type="button" hx-delete="{% url 'project_delete' project.id %}" hx-target="#project-{{ project.id }}" hx-swap="outerHTML" hx-confirm="Удалить проект «{{ project.name }}» навсегда?" class="btn btn-danger btn-sm">Удалить</button>
+      {% if project.is_archived and project|can_admin_project:user %}
+      <form method="post" action="{% url 'project_restore' project.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-secondary btn-sm">Восстановить</button>
+      </form>
+      {% endif %}
+      {% if project.is_archived and project|can_own_project:user %}
+      <button type="button" hx-delete="{% url 'project_delete' project.id %}" hx-target="#project-{{ project.id }}" hx-swap="outerHTML" hx-confirm="Удалить архивный проект «{{ project.name }}» навсегда? Это действие необратимо." class="btn btn-danger btn-sm">Удалить навсегда</button>
       {% endif %}
     </div>
   {% endif %}

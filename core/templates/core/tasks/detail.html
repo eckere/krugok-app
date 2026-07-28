@@ -76,7 +76,7 @@
         <form method="post" action="{% url 'comment_create' task.id %}">
           {% csrf_token %}
           <div class="form-field">
-            <label class="form-label">Комментарий</label>
+            <label for="{{ comment_form.text.id_for_label }}" class="form-label">Комментарий</label>
             {{ comment_form.text }}
             {% if comment_form.text.errors %}
               <div class="form-error">{{ comment_form.text.errors|join:', ' }}</div>

@@ -3,13 +3,16 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}КружокAPP{% endblock %}</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script nonce="{{ request.csp_nonce }}" src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+    <script nonce="{{ request.csp_nonce }}"
+            src="https://unpkg.com/htmx.org@2.0.3/dist/htmx.min.js"
+            integrity="sha384-0895/pl2MU10Hqc6jd4RvrthNlDiE9U1tWmX7WRESftEDRosgxNsQG/Ze9YMRzHq"
+            crossorigin="anonymous"></script>
     <link rel="stylesheet" href="{% static 'core/app.css' %}">
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
@@ -74,7 +77,7 @@
                                 <span class="account-option__avatar">{{ account.first_name|default:account.username|first|upper }}</span>
                                 <span class="account-option__copy">
                                     <strong>{{ account.display_name }}</strong>
-                                    <small>@{{ account.username }}</small>
+                                    <small>@{{ account.public_username|default:account.username }}</small>
                                 </span>
                                 {% if account.id == user.id %}<span class="account-option__check">✓</span>{% endif %}
                             </button>
@@ -103,6 +106,10 @@
     {% endif %}
             <div id="auth-status" class="hidden"></div>
             {% block content %}{% endblock %}
+            <footer class="app-footer">
+                <a href="{% url 'privacy_policy' %}">Конфиденциальность</a>
+                <a href="{% url 'terms_of_use' %}">Правила сервиса</a>
+            </footer>
     {% if user_can_access %}
         </main>
     </div>
@@ -113,10 +120,95 @@
     {% if not user.is_authenticated %}
         {% include 'core/loading.html' %}
     {% endif %}
-    <script>
-        document.body.addEventListener('closeModal', function (event) {
-            var modal = document.getElementById(event.detail.id);
+    <script nonce="{{ request.csp_nonce }}">
+        var modalReturnFocus = null;
+
+        function closeAppModal(modalId) {
+            var modal = document.getElementById(modalId);
             if (modal) modal.innerHTML = '';
+            if (modalReturnFocus && document.contains(modalReturnFocus)) {
+                modalReturnFocus.focus();
+            }
+            modalReturnFocus = null;
+        }
+
+        document.body.addEventListener('closeModal', function (event) {
+            closeAppModal(event.detail.id);
+        });
+
+        document.addEventListener('click', function (event) {
+            var selectable = event.target.closest('[data-select-on-click]');
+            if (selectable) selectable.select();
+            var closeControl = event.target.closest('[data-close-modal]');
+            if (closeControl) {
+                closeAppModal(closeControl.getAttribute('data-close-modal'));
+                return;
+            }
+            var backdrop = event.target.closest('[data-modal-backdrop]');
+            if (backdrop && event.target === backdrop) {
+                closeAppModal(backdrop.getAttribute('data-modal-backdrop'));
+            }
+        });
+
+        document.addEventListener('keydown', function (event) {
+            var dialog = document.querySelector('.modal-backdrop [role="dialog"]');
+            if (!dialog) return;
+            if (event.key === 'Escape') {
+                closeAppModal(dialog.closest('.modal-backdrop').parentElement.id);
+                return;
+            }
+            if (event.key !== 'Tab') return;
+            var controls = dialog.querySelectorAll(
+                'a[href], button:not([disabled]), input:not([disabled]), ' +
+                'select:not([disabled]), textarea:not([disabled]), [tabindex="0"]'
+            );
+            if (!controls.length) return;
+            var first = controls[0];
+            var last = controls[controls.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+
+        document.body.addEventListener('htmx:beforeRequest', function (event) {
+            if (event.detail.elt.matches('[hx-get][hx-target$="-modal"]')) {
+                modalReturnFocus = event.detail.elt;
+            }
+        });
+
+        document.body.addEventListener('htmx:afterSwap', function (event) {
+            var dialog = event.detail.target.querySelector('[role="dialog"]');
+            if (dialog) {
+                var autofocus = dialog.querySelector(
+                    'input:not([type="hidden"]), select, textarea, button'
+                );
+                if (autofocus) autofocus.focus();
+            }
+        });
+
+        document.body.addEventListener('htmx:configRequest', function (event) {
+            if (event.detail.elt && event.detail.elt.id === 'message-list') {
+                var lastMessage = event.detail.elt.querySelector(
+                    '[data-message-id]:last-of-type'
+                );
+                event.detail.parameters.after = lastMessage
+                    ? lastMessage.dataset.messageId
+                    : 0;
+            }
+        });
+
+        document.body.addEventListener('htmx:afterRequest', function (event) {
+            if (
+                event.detail.elt
+                && event.detail.elt.id === 'message-composer'
+                && event.detail.successful
+            ) {
+                event.detail.elt.reset();
+            }
         });
 
         (function () {
@@ -264,6 +356,7 @@
 
             var script = document.createElement('script');
             script.async = true;
+            script.nonce = '{{ request.csp_nonce }}';
             script.src = 'https://telegram.org/js/telegram-widget.js?22';
             script.setAttribute('data-telegram-login', '{{ telegram_bot_username|escapejs }}');
             script.setAttribute('data-size', 'large');

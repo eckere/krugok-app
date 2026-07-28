@@ -13,8 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -75,6 +75,12 @@ TELEGRAM_ADMIN_IDS = _parse_telegram_allowed_ids(
 # Username бота (без @) нужен только для виджета входа в обычном браузере.
 # Внутри Telegram Mini App используется initData и этот параметр не требуется.
 TELEGRAM_BOT_USERNAME = os.environ.get('TELEGRAM_BOT_USERNAME', '').strip().lstrip('@')
+PRIVACY_OPERATOR_NAME = os.environ.get(
+    'PRIVACY_OPERATOR_NAME',
+    'Администратор сервиса КружокAPP',
+).strip()
+PRIVACY_CONTACT = os.environ.get('PRIVACY_CONTACT', '').strip()
+SUPPORT_CONTACT = os.environ.get('SUPPORT_CONTACT', PRIVACY_CONTACT).strip()
 
 # Повторные попытки отправки Telegram-уведомлений.
 TELEGRAM_NOTIFICATION_MAX_ATTEMPTS = int(
@@ -117,12 +123,12 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'core.middleware.SecurityHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
     # Добавляет request.htmx — булев объект с атрибутами (request.htmx.boosted
     # и т.д.), чтобы во view отличать полный запрос от партиала HTMX.
     'django_htmx.middleware.HtmxMiddleware',
@@ -165,6 +171,15 @@ DATABASES = {
         'NAME': Path(os.environ.get('DATABASE_PATH', BASE_DIR / 'db.sqlite3')),
         'OPTIONS': {
             'timeout': int(os.environ.get('SQLITE_TIMEOUT', '30')),
+            # BEGIN IMMEDIATE сериализует короткие записи до их начала и
+            # исключает поздние "database is locked" внутри транзакции.
+            'transaction_mode': 'IMMEDIATE',
+            'init_command': (
+                'PRAGMA journal_mode=WAL; '
+                'PRAGMA synchronous=NORMAL; '
+                'PRAGMA foreign_keys=ON; '
+                'PRAGMA busy_timeout=30000;'
+            ),
         },
     }
 }
@@ -229,9 +244,10 @@ STORAGES = {
 # защитных механизма Django нужно осознанно ослабить именно под этот случай:
 # ---------------------------------------------------------------------------
 
-# 1) По умолчанию Django шлёт X-Frame-Options: DENY и браузер откажется
-#    рендерить страницу во фрейме Telegram. Разрешаем embedding.
-X_FRAME_OPTIONS = 'ALLOWALL'
+# 1) XFrameOptionsMiddleware не используется: устаревший X-Frame-Options не
+#    умеет безопасный allow-list. Встраивание ограничивает CSP frame-ancestors
+#    из SecurityHeadersMiddleware.
+SILENCED_SYSTEM_CHECKS = ['security.W002']
 
 # 2) Cookie сессии/CSRF выставляются с нашего домена, но браузер видит их
 #    в контексте чужого документа (telegram.org), т.е. это third-party
@@ -262,5 +278,68 @@ SECURE_SSL_REDIRECT = (
     not DEBUG or os.environ.get('SECURE_SSL_REDIRECT', 'False') == 'True'
 )
 SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '0'))
-SECURE_HSTS_INCLUDE_SUBDOMAINS = SECURE_HSTS_SECONDS > 0
-SECURE_HSTS_PRELOAD = SECURE_HSTS_SECONDS > 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = (
+    os.environ.get('SECURE_HSTS_INCLUDE_SUBDOMAINS', 'False') == 'True'
+)
+SECURE_HSTS_PRELOAD = os.environ.get('SECURE_HSTS_PRELOAD', 'False') == 'True'
+
+SESSION_COOKIE_AGE = int(os.environ.get('SESSION_COOKIE_AGE', str(7 * 24 * 60 * 60)))
+SESSION_COOKIE_HTTPONLY = True
+SESSION_SAVE_EVERY_REQUEST = False
+CSRF_COOKIE_HTTPONLY = False
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = int(
+    os.environ.get('DATA_UPLOAD_MAX_MEMORY_SIZE', str(2 * 1024 * 1024))
+)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = int(
+    os.environ.get('DATA_UPLOAD_MAX_NUMBER_FIELDS', '200')
+)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'structured': {
+            '()': 'core.logging.JsonFormatter',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'structured',
+        },
+    },
+    'root': {'handlers': ['console'], 'level': os.environ.get('LOG_LEVEL', 'INFO')},
+    'loggers': {
+        'django.request': {
+            'handlers': ['console'],
+            'level': os.environ.get('DJANGO_REQUEST_LOG_LEVEL', 'WARNING'),
+            'propagate': False,
+        },
+    },
+}
+
+
+def _validate_production_settings():
+    if DEBUG:
+        return
+    errors = []
+    if len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure-'):
+        errors.append('SECRET_KEY должен быть случайным и содержать не меньше 50 символов.')
+    if not ALLOWED_HOSTS:
+        errors.append('ALLOWED_HOSTS не может быть пустым.')
+    if not CSRF_TRUSTED_ORIGINS:
+        errors.append('CSRF_TRUSTED_ORIGINS не может быть пустым.')
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN.startswith('replace-'):
+        errors.append('TELEGRAM_BOT_TOKEN не настроен.')
+    if not TELEGRAM_SECURE_COOKIES:
+        errors.append('В production обязательны Secure cookies.')
+    if not SECURE_SSL_REDIRECT:
+        errors.append('В production обязателен SECURE_SSL_REDIRECT.')
+    if SECURE_HSTS_SECONDS < 3600:
+        errors.append('SECURE_HSTS_SECONDS должен быть не меньше 3600.')
+    if errors:
+        raise ImproperlyConfigured('Небезопасная production-конфигурация: ' + ' '.join(errors))
+
+
+_validate_production_settings()

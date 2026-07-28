@@ -82,7 +82,8 @@ def validate_init_data(init_data: str, bot_token: str | None = None) -> dict:
     except ValueError:
         raise InitDataValidationError('Некорректное поле auth_date')
 
-    if time.time() - auth_date > MAX_INIT_DATA_AGE_SECONDS:
+    now = time.time()
+    if auth_date > now + 60 or now - auth_date > MAX_INIT_DATA_AGE_SECONDS:
         raise InitDataValidationError('initData устарел')
 
     user_raw = data.get('user')
@@ -94,8 +95,17 @@ def validate_init_data(init_data: str, bot_token: str | None = None) -> dict:
     except json.JSONDecodeError as exc:
         raise InitDataValidationError('Не удалось распарсить поле user') from exc
 
-    if 'id' not in user_data:
-        raise InitDataValidationError('В данных пользователя отсутствует id')
+    if not isinstance(user_data, dict):
+        raise InitDataValidationError('Данные пользователя имеют неверный формат')
+    try:
+        telegram_id = int(user_data['id'])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise InitDataValidationError(
+            'В данных пользователя отсутствует корректный id'
+        ) from exc
+    if telegram_id <= 0 or telegram_id > 2**63 - 1:
+        raise InitDataValidationError('Некорректный Telegram ID')
+    user_data['id'] = telegram_id
 
     return user_data
 
@@ -136,7 +146,7 @@ def validate_login_widget_data(
         auth_date = int(auth_data['auth_date'])
     except (KeyError, TypeError, ValueError) as exc:
         raise LoginWidgetValidationError('В данных виджета нет корректных id или auth_date') from exc
-    if telegram_id <= 0:
+    if telegram_id <= 0 or telegram_id > 2**63 - 1:
         raise LoginWidgetValidationError('Некорректный Telegram ID')
 
     signed_data = {

@@ -14,6 +14,19 @@
         Мои
       </a>
     </div>
+    <form method="get" action="{% url 'task_list' %}" class="toolbar__search">
+      <input type="hidden" name="filter" value="{{ filter }}">
+      <label class="sr-only" for="task-search">Поиск задач</label>
+      <input id="task-search" name="q" value="{{ query }}" placeholder="Поиск задач">
+      <label class="sr-only" for="task-status-filter">Статус</label>
+      <select id="task-status-filter" name="status">
+        <option value="">Все статусы</option>
+        <option value="new" {% if status_filter == 'new' %}selected{% endif %}>Новая</option>
+        <option value="in_progress" {% if status_filter == 'in_progress' %}selected{% endif %}>В процессе</option>
+        <option value="done" {% if status_filter == 'done' %}selected{% endif %}>Выполнена</option>
+      </select>
+      <button type="submit" class="btn btn-secondary btn-sm">Найти</button>
+    </form>
   </div>
   <div class="panel__body">
     <div id="task-list" class="entity-list">
@@ -23,5 +36,12 @@
         <div class="empty-state">Задач пока нет</div>
       {% endfor %}
     </div>
+    {% if tasks.has_other_pages %}
+      <nav class="pagination" aria-label="Страницы задач">
+        {% if tasks.has_previous %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&page={{ tasks.previous_page_number }}">Назад</a>{% endif %}
+        <span>{{ tasks.number }} / {{ tasks.paginator.num_pages }}</span>
+        {% if tasks.has_next %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&page={{ tasks.next_page_number }}">Далее</a>{% endif %}
+      </nav>
+    {% endif %}
   </div>
 </div>

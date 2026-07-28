@@ -28,11 +28,11 @@
           {% if form.task.errors %}<div class="form-error">{{ form.task.errors|join:", " }}</div>{% endif %}
         </div>
 
-        <div class="form-field form-field--full">
-          <label class="form-label">Участники</label>
+        <fieldset class="form-field form-field--full">
+          <legend class="form-label">Участники</legend>
           <div class="checkbox-list scroll-area">{{ form.participants }}</div>
           {% if form.participants.errors %}<div class="form-error">{{ form.participants.errors|join:", " }}</div>{% endif %}
-        </div>
+        </fieldset>
       </div>
 
       {% if form.non_field_errors %}<div class="form-error">{{ form.non_field_errors|join:", " }}</div>{% endif %}

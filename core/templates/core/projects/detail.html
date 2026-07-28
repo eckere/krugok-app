@@ -78,6 +78,38 @@
           </div>
         </div>
       </section>
+
+      {% if archived_stages and project|can_admin_project:user %}
+      <section class="panel">
+        <div class="panel__header">
+          <div>
+            <h2 class="panel__title">Архивные этапы</h2>
+            <div class="panel__subtitle">Их можно вернуть в конец списка</div>
+          </div>
+        </div>
+        <div class="panel__body entity-list">
+          {% for archived_stage in archived_stages %}
+            <div class="member-row">
+              <span class="member-row__name">{{ archived_stage.name }}</span>
+              <form method="post" action="{% url 'stage_restore' archived_stage.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary btn-sm">Восстановить</button>
+              </form>
+              {% if project|can_own_project:user %}
+                <button type="button"
+                        hx-delete="{% url 'stage_delete' archived_stage.id %}"
+                        hx-target="closest .member-row"
+                        hx-swap="outerHTML"
+                        hx-confirm="Удалить архивный этап «{{ archived_stage.name }}» навсегда?"
+                        class="btn btn-danger btn-sm">
+                  Удалить навсегда
+                </button>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
     </main>
 
     <aside class="project-aside">
@@ -119,6 +151,29 @@
                   class="btn btn-secondary btn-sm">
             Перенести в архив
           </button>
+        </div>
+      </section>
+      {% endif %}
+
+      {% if ownership_form %}
+      <section class="panel">
+        <div class="panel__body project-settings">
+          <div>
+            <h2 class="panel__title">Передача владения</h2>
+            <div class="panel__subtitle">Действие попадёт в журнал аудита</div>
+          </div>
+          <form method="post" action="{% url 'project_transfer_ownership' project.id %}">
+            {% csrf_token %}
+            <div class="form-field">
+              <label for="{{ ownership_form.new_owner.id_for_label }}" class="form-label">Новый владелец</label>
+              {{ ownership_form.new_owner }}
+            </div>
+            <div class="form-field">
+              <label for="{{ ownership_form.confirmation.id_for_label }}" class="form-label">Введите ПЕРЕДАТЬ</label>
+              {{ ownership_form.confirmation }}
+            </div>
+            <button type="submit" class="btn btn-danger btn-sm">Передать проект</button>
+          </form>
         </div>
       </section>
       {% endif %}

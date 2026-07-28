@@ -1,4 +1,5 @@
 import secrets
+import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -7,6 +8,7 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinLengthValidator
 from django.db import models
+from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
@@ -25,11 +27,18 @@ INVITE_START_PARAM_PREFIX = 'invite_'
 
 class TelegramUser(AbstractUser):
     telegram_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
+    telegram_username = models.CharField(max_length=64, blank=True, db_index=True)
     photo_url = models.URLField(blank=True, null=True)
     last_seen = models.DateTimeField(auto_now=True)
     language_code = models.CharField(max_length=12, blank=True, default='en')
     is_premium = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False)
+    timezone = models.CharField(max_length=64, default='Europe/Moscow')
+    notify_deadlines = models.BooleanField(default=True)
+    notify_assignments = models.BooleanField(default=True)
+    notify_comments = models.BooleanField(default=True)
+    notify_messages = models.BooleanField(default=True)
+    anonymized_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['first_name']
@@ -40,6 +49,25 @@ class TelegramUser(AbstractUser):
     @property
     def display_name(self):
         return self.get_full_name() or self.username
+
+    @property
+    def public_username(self):
+        return self.telegram_username
+
+    def anonymize(self):
+        """Деактивирует аккаунт, не разрушая историю командной работы."""
+        self.username = f'deleted_{uuid.uuid4().hex}'
+        self.telegram_id = None
+        self.telegram_username = ''
+        self.first_name = ''
+        self.last_name = ''
+        self.email = ''
+        self.photo_url = None
+        self.is_active = False
+        self.is_verified = False
+        self.anonymized_at = timezone.now()
+        self.set_unusable_password()
+        self.save()
 
 
 class InviteCode(models.Model):
@@ -73,6 +101,18 @@ class InviteCode(models.Model):
         null=True,
         blank=True,
         help_text='По умолчанию приглашение действует 7 дней. Оставьте пустым для бессрочного.',
+    )
+    project = models.ForeignKey(
+        'Project',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='invite_codes',
+    )
+    project_role = models.CharField(
+        max_length=20,
+        choices=[('admin', 'Админ'), ('member', 'Участник')],
+        default='member',
     )
 
     class Meta:
@@ -222,7 +262,11 @@ class Stage(models.Model):
     class Meta:
         ordering = ['order', 'created_at']
         constraints = [
-            models.UniqueConstraint(fields=['project', 'order'], name='unique_stage_order_per_project'),
+            models.UniqueConstraint(
+                fields=['project', 'order'],
+                condition=Q(is_archived=False, order__isnull=False),
+                name='unique_active_stage_order_per_project',
+            ),
         ]
 
     def __str__(self):
@@ -308,9 +352,13 @@ class Notification(models.Model):
         DEADLINE_SET = 'deadline_set', 'Дедлайн установлен'
         DEADLINE_APPROACHING = 'deadline_approaching', 'Дедлайн приближается'
         DEADLINE_OVERDUE = 'deadline_overdue', 'Дедлайн просрочен'
+        TASK_ASSIGNED = 'task_assigned', 'Назначена задача'
+        COMMENT_ADDED = 'comment_added', 'Добавлен комментарий'
+        MESSAGE_ADDED = 'message_added', 'Новое сообщение'
 
     class Status(models.TextChoices):
         PENDING = 'pending', 'Ожидает отправки'
+        SENDING = 'sending', 'Отправляется'
         SENT = 'sent', 'Отправлено'
         FAILED = 'failed', 'Ошибка отправки'
 
@@ -343,6 +391,87 @@ class Notification(models.Model):
 
     def __str__(self) -> str:
         return f'{self.get_kind_display()}: {self.task}'
+
+
+class OutboundMessage(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Ожидает'
+        SENDING = 'sending', 'Отправляется'
+        SENT = 'sent', 'Отправлено'
+        FAILED = 'failed', 'Ошибка'
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='outbound_messages',
+    )
+    notification = models.OneToOneField(
+        Notification,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='outbound_message',
+    )
+    kind = models.CharField(max_length=32)
+    dedupe_key = models.CharField(max_length=128, unique=True)
+    text = models.TextField()
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    error_message = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['status', 'next_retry_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.kind} → {self.recipient}'
+
+
+class AuditLog(models.Model):
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='audit_events',
+    )
+    action = models.CharField(max_length=64, db_index=True)
+    entity_type = models.CharField(max_length=64, db_index=True)
+    entity_id = models.CharField(max_length=64, blank=True)
+    entity_label = models.CharField(max_length=255, blank=True)
+    changes = models.JSONField(default=dict, blank=True)
+    ip_hash = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['entity_type', 'entity_id', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.action}: {self.entity_type} {self.entity_id}'
+
+
+class RateLimitBucket(models.Model):
+    key_hash = models.CharField(max_length=64, unique=True)
+    window_started_at = models.DateTimeField()
+    request_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['updated_at'])]
 
 
 class Comment(models.Model):
@@ -405,6 +534,7 @@ class Message(models.Model):
     )
     text = models.TextField(validators=[MinLengthValidator(1)])
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    edited_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['created_at']

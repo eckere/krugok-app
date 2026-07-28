@@ -18,7 +18,6 @@
       {% if project|can_admin_project:user %}
         <button type="button" hx-get="{% url 'stage_update' stage.id %}" hx-target="#stage-modal" hx-swap="innerHTML" class="btn btn-secondary btn-sm">Изменить</button>
         <button type="button" hx-post="{% url 'stage_archive' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Архивировать этап «{{ stage.name }}»?" class="btn btn-secondary btn-sm">В архив</button>
-        <button type="button" hx-delete="{% url 'stage_delete' stage.id %}" hx-target="#stage-{{ stage.id }}" hx-swap="outerHTML" hx-confirm="Удалить этап «{{ stage.name }}»?" class="btn btn-danger btn-sm">Удалить</button>
       {% endif %}
     </div>
   </div>

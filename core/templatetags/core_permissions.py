@@ -1,12 +1,12 @@
 from django import template
 
+from core.access import is_app_admin
 from core.permissions import (
     can_change_task_status,
     can_delete_project,
     can_edit_task,
     can_manage_project,
 )
-from core.access import is_app_admin
 
 register = template.Library()
 

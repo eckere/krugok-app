@@ -8,8 +8,8 @@
     <div>
       <div class="page-header__eyebrow">Профиль</div>
       <h1 class="page-header__title">{{ profile_user.display_name }}</h1>
-      {% if profile_user.username %}
-        <p class="page-header__subtitle">@{{ profile_user.username }}</p>
+      {% if profile_user.public_username %}
+        <p class="page-header__subtitle">@{{ profile_user.public_username }}</p>
       {% endif %}
     </div>
     <div class="page-header__actions">
@@ -27,10 +27,68 @@
     </div>
     <div class="profile-card__content">
       <h2>{{ profile_user.display_name }}</h2>
-      {% if profile_user.username %}
-        <div class="profile-card__username">@{{ profile_user.username }}</div>
+      {% if profile_user.public_username %}
+        <div class="profile-card__username">@{{ profile_user.public_username }}</div>
       {% endif %}
     </div>
   </section>
+
+  {% if settings_form %}
+    <section class="panel profile-settings">
+      <div class="panel__header">
+        <div>
+          <h2 class="panel__title">Настройки</h2>
+          <div class="panel__subtitle">Часовой пояс и уведомления</div>
+        </div>
+      </div>
+      <div class="panel__body">
+        <form method="post" action="{% url 'profile_settings' %}">
+          {% csrf_token %}
+          <div class="form-grid">
+            {% for field in settings_form %}
+              <div class="form-field {% if field.name == 'timezone' %}form-field--full{% endif %}">
+                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                {{ field }}
+                {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel profile-settings">
+      <div class="panel__body">
+        <form method="post" action="{% url 'account_logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-secondary">Выйти из аккаунта</button>
+        </form>
+
+        <details class="danger-zone">
+          <summary>Удалить аккаунт</summary>
+          <p class="form-hint">
+            Профиль будет обезличен. Сначала передайте или архивируйте активные проекты.
+          </p>
+          <form method="post" action="{% url 'account_delete' %}">
+            {% csrf_token %}
+            {{ delete_form.non_field_errors }}
+            <div class="form-field">
+              <label for="{{ delete_form.confirmation.id_for_label }}" class="form-label">
+                Введите УДАЛИТЬ
+              </label>
+              {{ delete_form.confirmation }}
+              {% if delete_form.confirmation.errors %}
+                <div class="form-error">{{ delete_form.confirmation.errors|join:', ' }}</div>
+              {% endif %}
+            </div>
+            <button type="submit" class="btn btn-danger">Обезличить аккаунт</button>
+          </form>
+        </details>
+      </div>
+    </section>
+  {% endif %}
 </div>
 {% endblock %}

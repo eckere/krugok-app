@@ -11,6 +11,27 @@
     <div class="message__meta">
       <a href="{% url 'profile_detail' message.sender.id %}">{{ message.sender.display_name }}</a>,
       {{ message.created_at|date:"H:i" }}
+      {% if message.edited_at %}· изменено{% endif %}
     </div>
+    {% if message.sender == request.user %}
+      <details class="message__actions">
+        <summary>Изменить</summary>
+        <form hx-post="{% url 'message_update' message.id %}"
+              hx-target="#message-{{ message.id }}"
+              hx-swap="outerHTML">
+          {% csrf_token %}
+          <textarea name="text" rows="2" required>{{ message.text }}</textarea>
+          <button type="submit" class="btn btn-secondary btn-sm">Сохранить</button>
+        </form>
+        <button type="button"
+                hx-delete="{% url 'message_delete' message.id %}"
+                hx-target="#message-{{ message.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Удалить сообщение?"
+                class="btn btn-danger btn-sm">
+          Удалить
+        </button>
+      </details>
+    {% endif %}
   </div>
 </article>

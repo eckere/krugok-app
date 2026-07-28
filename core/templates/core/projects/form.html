@@ -1,8 +1,8 @@
-<div class="modal-backdrop" onclick="if(event.target===this){document.getElementById('project-modal').innerHTML=''}">
+<div class="modal-backdrop" data-modal-backdrop="project-modal">
 <section id="project-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true">
   <div class="modal-header">
     <h3 class="modal-title">{% if form.instance.pk %}Редактировать проект{% else %}Новый проект{% endif %}</h3>
-    <button type="button" aria-label="Закрыть" onclick="document.getElementById('project-modal').innerHTML=''" class="modal-close">×</button>
+    <button type="button" aria-label="Закрыть" data-close-modal="project-modal" class="modal-close">×</button>
   </div>
 
   <form method="post"
@@ -17,14 +17,14 @@
     <div class="form-grid">
       {% for field in form %}
         <div class="form-field form-field--full">
-          <label class="form-label">{{ field.label }}</label>
+          <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
           {{ field }}
           {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
         </div>
       {% endfor %}
     </div>
     <div class="form-actions">
-      <button type="button" onclick="document.getElementById('project-modal').innerHTML=''" class="btn btn-ghost">Отмена</button>
+      <button type="button" data-close-modal="project-modal" class="btn btn-ghost">Отмена</button>
       <button type="submit" class="btn btn-primary">Сохранить</button>
     </div>
   </form>

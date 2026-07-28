@@ -287,7 +287,7 @@ class InviteCodeTests(TestCase):
 
         self.assertRedirects(response, reverse('invite_redeem'))
 
-    def test_existing_session_remembers_startapp_invite_before_redirect(self):
+    def test_existing_session_redeems_startapp_invite_automatically(self):
         invite = InviteCode.objects.create()
 
         response = self.client.get(
@@ -295,11 +295,13 @@ class InviteCodeTests(TestCase):
             {'tgWebAppStartParam': f'invite_{invite.code}'},
         )
 
-        self.assertRedirects(response, reverse('invite_redeem'))
-        self.assertEqual(
-            self.client.session['pending_invite_code'],
-            invite.code,
-        )
+        self.assertRedirects(response, reverse('index'))
+        self.user.refresh_from_db()
+        invite.refresh_from_db()
+        self.assertTrue(self.user.is_verified)
+        self.assertEqual(invite.used_by, self.user)
+        self.assertFalse(invite.is_active)
+        self.assertNotIn('pending_invite_code', self.client.session)
 
     def test_unverified_htmx_request_redirects_to_invite_form(self):
         response = self.client.post(

@@ -8,7 +8,7 @@ from django.conf import settings
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required as django_login_required
 from django.core.exceptions import PermissionDenied
-from django.db import connection, models, transaction
+from django.db import connection, models
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -18,7 +18,7 @@ from django.utils.html import escape
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .access import user_has_access
+from .access import redeem_invite_code, user_has_access
 from .forms import (
     CommentForm,
     DiscussionForm,
@@ -141,32 +141,6 @@ def dev_switch_account(request, user_id):
     return redirect('index')
 
 
-def _redeem_invite_code(user, code) -> bool:
-    """Атомарно погашает одноразовое приглашение для пользователя."""
-    now = timezone.now()
-    with transaction.atomic():
-        invite = (
-            InviteCode.objects.select_for_update()
-            .filter(code=code, is_active=True, used_by__isnull=True)
-            .filter(
-                models.Q(expires_at__isnull=True)
-                | models.Q(expires_at__gt=now)
-            )
-            .first()
-        )
-        if invite is None:
-            return False
-
-        TelegramUser.objects.filter(pk=user.pk).update(is_verified=True)
-        InviteCode.objects.filter(pk=invite.pk).update(
-            used_by=user,
-            used_at=now,
-            is_active=False,
-        )
-        user.is_verified = True
-        return True
-
-
 def _telegram_login_response(redirect_url=None):
     return JsonResponse(
         {'success': True, 'redirect_url': redirect_url or reverse('index')}
@@ -199,7 +173,7 @@ def auth_telegram(request):
     user = _login_telegram_user(request, tg_user)
 
     if invite_code and not user_has_access(user):
-        if _redeem_invite_code(user, invite_code):
+        if redeem_invite_code(user, invite_code):
             request.session.pop('pending_invite_code', None)
             return _telegram_login_response(reverse('index'))
 
@@ -257,7 +231,7 @@ def invite_redeem(request):
 
     if request.method == 'POST':
         form = InviteCodeRedeemForm(request.POST)
-        if form.is_valid() and _redeem_invite_code(
+        if form.is_valid() and redeem_invite_code(
             request.user, form.cleaned_data['code']
         ):
             request.session.pop('pending_invite_code', None)

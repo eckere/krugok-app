@@ -1,6 +1,10 @@
 """Единая проверка доступа к приложению после Telegram-аутентификации."""
 
 from django.conf import settings
+from django.db import models, transaction
+from django.utils import timezone
+
+from .models import InviteCode, TelegramUser
 
 
 def is_telegram_id_allowed(telegram_id: int | None) -> bool:
@@ -14,3 +18,29 @@ def user_has_access(user) -> bool:
         user.is_authenticated
         and (is_telegram_id_allowed(user.telegram_id) or user.is_verified)
     )
+
+
+def redeem_invite_code(user, code) -> bool:
+    """Атомарно погашает одноразовое приглашение для пользователя."""
+    now = timezone.now()
+    with transaction.atomic():
+        invite = (
+            InviteCode.objects.select_for_update()
+            .filter(code=code, is_active=True, used_by__isnull=True)
+            .filter(
+                models.Q(expires_at__isnull=True)
+                | models.Q(expires_at__gt=now)
+            )
+            .first()
+        )
+        if invite is None:
+            return False
+
+        TelegramUser.objects.filter(pk=user.pk).update(is_verified=True)
+        InviteCode.objects.filter(pk=invite.pk).update(
+            used_by=user,
+            used_at=now,
+            is_active=False,
+        )
+        user.is_verified = True
+        return True

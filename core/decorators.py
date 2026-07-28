@@ -4,7 +4,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 
-from .access import user_has_access
+from .access import redeem_invite_code, user_has_access
 from .telegram_auth import extract_invite_code_from_start_param
 
 
@@ -25,6 +25,9 @@ def require_verified_user(view_func):
             request.GET.get('tgWebAppStartParam', '')
         )
         if invite_code:
+            if redeem_invite_code(request.user, invite_code):
+                request.session.pop('pending_invite_code', None)
+                return redirect('index')
             request.session['pending_invite_code'] = invite_code
 
         invite_url = reverse('invite_redeem')

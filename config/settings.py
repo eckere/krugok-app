@@ -34,7 +34,10 @@ ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',
 TELEGRAM_BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 
 
-def _parse_telegram_allowed_ids(raw_value: str) -> frozenset[int]:
+def _parse_telegram_allowed_ids(
+    raw_value: str,
+    setting_name: str = 'TELEGRAM_ALLOWED_IDS',
+) -> frozenset[int]:
     """Читает список личных Telegram ID из .env без неявных допущений."""
     allowed_ids = set()
     for raw_id in raw_value.split(','):
@@ -45,12 +48,12 @@ def _parse_telegram_allowed_ids(raw_value: str) -> frozenset[int]:
             telegram_id = int(raw_id)
         except ValueError as exc:
             raise ImproperlyConfigured(
-                'TELEGRAM_ALLOWED_IDS должен содержать только числовые Telegram ID, '
+                f'{setting_name} должен содержать только числовые Telegram ID, '
                 'разделённые запятыми.'
             ) from exc
         if telegram_id <= 0:
             raise ImproperlyConfigured(
-                'TELEGRAM_ALLOWED_IDS должен содержать только положительные личные Telegram ID.'
+                f'{setting_name} должен содержать только положительные личные Telegram ID.'
             )
         allowed_ids.add(telegram_id)
     return frozenset(allowed_ids)
@@ -62,9 +65,32 @@ TELEGRAM_ALLOWED_IDS = _parse_telegram_allowed_ids(
     os.environ.get('TELEGRAM_ALLOWED_IDS', '')
 )
 
+# Глобальные администраторы приложения. Это отдельное прикладное право:
+# оно не выдаёт доступ к Django admin и не требует is_staff/is_superuser.
+TELEGRAM_ADMIN_IDS = _parse_telegram_allowed_ids(
+    os.environ.get('TELEGRAM_ADMIN_IDS', ''),
+    'TELEGRAM_ADMIN_IDS',
+)
+
 # Username бота (без @) нужен только для виджета входа в обычном браузере.
 # Внутри Telegram Mini App используется initData и этот параметр не требуется.
 TELEGRAM_BOT_USERNAME = os.environ.get('TELEGRAM_BOT_USERNAME', '').strip().lstrip('@')
+
+# Повторные попытки отправки Telegram-уведомлений.
+TELEGRAM_NOTIFICATION_MAX_ATTEMPTS = int(
+    os.environ.get('TELEGRAM_NOTIFICATION_MAX_ATTEMPTS', '5')
+)
+TELEGRAM_NOTIFICATION_RETRY_SECONDS = int(
+    os.environ.get('TELEGRAM_NOTIFICATION_RETRY_SECONDS', '900')
+)
+if TELEGRAM_NOTIFICATION_MAX_ATTEMPTS < 1:
+    raise ImproperlyConfigured(
+        'TELEGRAM_NOTIFICATION_MAX_ATTEMPTS должен быть не меньше 1.'
+    )
+if TELEGRAM_NOTIFICATION_RETRY_SECONDS < 0:
+    raise ImproperlyConfigured(
+        'TELEGRAM_NOTIFICATION_RETRY_SECONDS не может быть отрицательным.'
+    )
 
 # Используется в Django admin для полной ссылки-приглашения. В production
 # берётся существующий APP_DOMAIN; локально остаётся относительная ссылка.

@@ -6,6 +6,7 @@ from core.permissions import (
     can_edit_task,
     can_manage_project,
 )
+from core.access import is_app_admin
 
 register = template.Library()
 
@@ -28,3 +29,8 @@ def can_manage_task(task, user) -> bool:
 @register.filter
 def can_update_task_status(task, user) -> bool:
     return can_change_task_status(task, user)
+
+
+@register.filter
+def can_remove_project_member(project, user) -> bool:
+    return is_app_admin(user) or can_delete_project(project, user)

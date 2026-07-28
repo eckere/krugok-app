@@ -1,6 +1,6 @@
 from django.conf import settings
 
-from .access import user_has_access
+from .access import is_app_admin, user_has_access
 from .models import TelegramUser
 
 
@@ -28,5 +28,6 @@ def telegram_login(request):
         'telegram_bot_username': settings.TELEGRAM_BOT_USERNAME,
         'telegram_login_enabled': bool(settings.TELEGRAM_BOT_USERNAME),
         'user_can_access': user_has_access(request.user),
+        'is_app_admin': is_app_admin(request.user),
         'dev_login_enabled': settings.DEBUG,
     }

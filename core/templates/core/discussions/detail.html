@@ -7,7 +7,7 @@
   <div class="chat">
     <header class="chat__header">
       <a href="{% url 'discussion_list' %}" class="chat__back" aria-label="Назад">←</a>
-      <div>
+      <div class="chat__header-copy">
         <h1 class="panel__title">{{ discussion.title }}</h1>
         <div class="panel__subtitle">
           {{ discussion.participants.count }} участников
@@ -16,6 +16,15 @@
           {% endif %}
         </div>
       </div>
+      {% if is_app_admin %}
+        <button type="button"
+                hx-delete="{% url 'discussion_delete' discussion.id %}?redirect=1"
+                hx-swap="none"
+                hx-confirm="Удалить обсуждение «{{ discussion.title }}» вместе со всей перепиской?"
+                class="btn btn-danger btn-sm chat__delete">
+          Удалить
+        </button>
+      {% endif %}
     </header>
 
     <div id="message-list" class="chat__messages scroll-area"

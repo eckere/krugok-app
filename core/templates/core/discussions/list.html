@@ -17,35 +17,49 @@
   <section class="panel discussion-list-panel">
     <div class="panel__header">
       <div>
-        <h2 class="panel__title">Ваши чаты</h2>
-        <div class="panel__subtitle">Обсуждения, в которых вы участвуете</div>
+        <h2 class="panel__title">{% if is_app_admin %}Все чаты{% else %}Ваши чаты{% endif %}</h2>
+        <div class="panel__subtitle">
+          {% if is_app_admin %}Обсуждения всех участников приложения{% else %}Обсуждения, в которых вы участвуете{% endif %}
+        </div>
       </div>
       <span class="chip">{{ discussions|length }}</span>
     </div>
     <div id="discussion-list" class="panel__body--flush">
       {% for discussion in discussions %}
-        <a href="{% url 'discussion_detail' discussion.id %}" class="discussion-link">
-          <div class="discussion-link__avatar">{{ discussion.title|first|upper }}</div>
-          <div class="discussion-link__content">
-            <div class="discussion-link__top">
-              <h2 class="discussion-link__title">{{ discussion.title }}</h2>
-              {% if discussion.messages.last %}
-                <time>{{ discussion.messages.last.created_at|date:"d.m, H:i" }}</time>
-              {% endif %}
+        <div id="discussion-row-{{ discussion.id }}" class="discussion-row">
+          <a href="{% url 'discussion_detail' discussion.id %}" class="discussion-link">
+            <div class="discussion-link__avatar">{{ discussion.title|first|upper }}</div>
+            <div class="discussion-link__content">
+              <div class="discussion-link__top">
+                <h2 class="discussion-link__title">{{ discussion.title }}</h2>
+                {% if discussion.messages.last %}
+                  <time>{{ discussion.messages.last.created_at|date:"d.m, H:i" }}</time>
+                {% endif %}
+              </div>
+              <div class="discussion-link__preview">
+                {% if discussion.messages.last %}
+                  {{ discussion.messages.last.sender.display_name }}: {{ discussion.messages.last.text|truncatechars:90 }}
+                {% else %}
+                  Сообщений пока нет
+                {% endif %}
+              </div>
+              <div class="discussion-link__meta">
+                {{ discussion.participants.count }} участников
+                {% if discussion.task %} · {{ discussion.task.title }}{% endif %}
+              </div>
             </div>
-            <div class="discussion-link__preview">
-              {% if discussion.messages.last %}
-                {{ discussion.messages.last.sender.display_name }}: {{ discussion.messages.last.text|truncatechars:90 }}
-              {% else %}
-                Сообщений пока нет
-              {% endif %}
-            </div>
-            <div class="discussion-link__meta">
-              {{ discussion.participants.count }} участников
-              {% if discussion.task %} · {{ discussion.task.title }}{% endif %}
-            </div>
-          </div>
-        </a>
+          </a>
+          {% if is_app_admin %}
+            <button type="button"
+                    hx-delete="{% url 'discussion_delete' discussion.id %}"
+                    hx-target="#discussion-row-{{ discussion.id }}"
+                    hx-swap="outerHTML"
+                    hx-confirm="Удалить обсуждение «{{ discussion.title }}» вместе со всей перепиской?"
+                    class="btn btn-danger btn-sm discussion-row__delete">
+              Удалить
+            </button>
+          {% endif %}
+        </div>
       {% empty %}
         <div class="empty-state discussion-empty">Вы пока не участвуете ни в одном обсуждении</div>
       {% endfor %}

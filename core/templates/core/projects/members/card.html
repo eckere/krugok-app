@@ -1,28 +1,36 @@
 {% load core_permissions %}
 <div id="membership-{{ membership.id }}" class="member-row">
-  <div class="member-row__identity">
-    <div class="member-row__avatar">{{ membership.user.first_name|default:membership.user.username|first|upper }}</div>
-    <div class="member-row__copy">
-      <div class="member-row__name">{{ membership.user.display_name }}</div>
-      <div class="member-row__role">{{ membership.get_role_display }}</div>
-    </div>
-  </div>
+  <a href="{% url 'profile_detail' membership.user.id %}" class="member-row__identity">
+    {% if membership.user.photo_url %}
+      <img class="member-row__avatar" src="{{ membership.user.photo_url }}" alt="">
+    {% else %}
+      <span class="member-row__avatar">{{ membership.user.first_name|default:membership.user.username|first|upper }}</span>
+    {% endif %}
+    <span class="member-row__copy">
+      <span class="member-row__name">{{ membership.user.display_name }}</span>
+      <span class="member-row__role">{{ membership.get_role_display }}</span>
+    </span>
+  </a>
 
-  {% if project|can_own_project:user and membership.user_id != project.owner_id %}
+  {% if membership.user_id != project.owner_id %}
     <div class="member-row__actions">
-      <button type="button"
-              hx-get="{% url 'project_member_update' membership.id %}"
-              hx-target="#member-modal" hx-swap="innerHTML"
-              class="btn btn-ghost btn-sm">
-        Роль
-      </button>
-      <button type="button"
-              hx-delete="{% url 'project_member_delete' membership.id %}"
-              hx-target="#membership-{{ membership.id }}" hx-swap="outerHTML"
-              hx-confirm="Удалить участника {{ membership.user.display_name }} из проекта?"
-              class="btn btn-danger btn-sm">
-        ×
-      </button>
+      {% if project|can_own_project:user %}
+        <button type="button"
+                hx-get="{% url 'project_member_update' membership.id %}"
+                hx-target="#member-modal" hx-swap="innerHTML"
+                class="btn btn-ghost btn-sm">
+          Роль
+        </button>
+      {% endif %}
+      {% if project|can_remove_project_member:user %}
+        <button type="button"
+                hx-delete="{% url 'project_member_delete' membership.id %}"
+                hx-target="#membership-{{ membership.id }}" hx-swap="outerHTML"
+                hx-confirm="Удалить участника {{ membership.user.display_name }} из проекта?"
+                class="btn btn-danger btn-sm">
+          ×
+        </button>
+      {% endif %}
     </div>
   {% endif %}
 </div>

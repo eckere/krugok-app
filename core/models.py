@@ -331,6 +331,9 @@ class Notification(models.Model):
         default=Status.PENDING,
     )
     error_message = models.TextField(blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    last_attempt_at = models.DateTimeField(null=True, blank=True)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     sent_at = models.DateTimeField(null=True, blank=True)
 

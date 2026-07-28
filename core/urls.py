@@ -13,6 +13,7 @@ urlpatterns = [
     path('invite/<str:code>/', views.invite_link, name='invite_link'),
     path('invites/', views.invite_list, name='invite_list'),
     path('invites/create/', views.invite_create, name='invite_create'),
+    path('users/<int:user_id>/', views.profile_detail, name='profile_detail'),
 
     path('tasks/', views.task_list, name='task_list'),
     path('tasks/create/', views.task_create, name='task_create'),
@@ -42,6 +43,7 @@ urlpatterns = [
     path('discussions/', views.discussion_list, name='discussion_list'),
     path('discussions/create/', views.discussion_create, name='discussion_create'),
     path('discussions/<int:discussion_id>/', views.discussion_detail, name='discussion_detail'),
+    path('discussions/<int:discussion_id>/delete/', views.discussion_delete, name='discussion_delete'),
     path('discussions/<int:discussion_id>/messages/create/', views.message_create, name='message_create'),
     path('discussions/<int:discussion_id>/messages/poll/', views.discussion_messages_poll, name='discussion_messages_poll'),
 ]

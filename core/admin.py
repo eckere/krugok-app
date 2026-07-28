@@ -79,7 +79,14 @@ class ProjectMembershipAdmin(admin.ModelAdmin):
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    list_display = ('task', 'recipient', 'kind', 'status', 'created_at')
+    list_display = (
+        'task',
+        'recipient',
+        'kind',
+        'status',
+        'attempt_count',
+        'created_at',
+    )
     list_filter = ('kind', 'status', 'created_at')
     search_fields = (
         'task__title',
@@ -93,6 +100,9 @@ class NotificationAdmin(admin.ModelAdmin):
         'kind',
         'status',
         'error_message',
+        'attempt_count',
+        'last_attempt_at',
+        'next_retry_at',
         'created_at',
         'sent_at',
     )

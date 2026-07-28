@@ -2,11 +2,12 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import Q, QuerySet
 from django.shortcuts import get_object_or_404
 
+from .access import is_app_admin
 from .models import Project, Stage, Task, Discussion
 
 
 def get_accessible_projects(user, *, include_archived: bool = False) -> QuerySet[Project]:
-    if user.is_superuser:
+    if is_app_admin(user):
         projects = Project.objects.all()
     else:
         projects = Project.objects.filter(
@@ -64,7 +65,11 @@ def get_project_or_403(project_id, user, *, required_role: str = 'member'):
         'owner': project.is_owner,
     }
     try:
-        has_access = user.is_superuser or checks[required_role](user)
+        has_access = (
+            (required_role == 'member' and is_app_admin(user))
+            or user.is_superuser
+            or checks[required_role](user)
+        )
     except KeyError as exc:
         raise ValueError(f'Неизвестная роль доступа: {required_role}') from exc
     if not has_access:
@@ -79,7 +84,7 @@ def get_stage_or_403(stage_id, user, *, required_role: str = 'member'):
     elif required_role == 'owner':
         has_access = can_delete_project(stage.project, user)
     elif required_role == 'member':
-        has_access = user.is_superuser or stage.project.is_member(user)
+        has_access = is_app_admin(user) or stage.project.is_member(user)
     else:
         raise ValueError(f'Неизвестная роль доступа: {required_role}')
     if not has_access:
@@ -107,7 +112,7 @@ def get_task_or_403(task_id, user, *, permission: str = 'view'):
 def get_discussion_or_403(discussion_id, user):
     discussion = get_object_or_404(Discussion, id=discussion_id)
     if not (
-        user.is_superuser
+        is_app_admin(user)
         or discussion.created_by_id == user.id
         or discussion.participants.filter(pk=user.pk).exists()
     ):

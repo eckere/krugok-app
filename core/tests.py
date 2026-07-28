@@ -363,10 +363,14 @@ class InviteCodeTests(TestCase):
         self.assertRedirects(response, reverse('index'))
         self.assertEqual(self.client.session['pending_invite_code'], invite.code)
 
-    @override_settings(TELEGRAM_BOT_USERNAME='KruzhokTeamBot')
-    def test_verified_user_can_create_invitation(self):
+    @override_settings(
+        TELEGRAM_BOT_USERNAME='KruzhokTeamBot',
+        TELEGRAM_ADMIN_IDS=frozenset({700000001}),
+    )
+    def test_app_admin_can_create_invitation(self):
+        self.user.telegram_id = 700000001
         self.user.is_verified = True
-        self.user.save(update_fields=['is_verified'])
+        self.user.save(update_fields=['telegram_id', 'is_verified'])
 
         response = self.client.post(reverse('invite_create'))
 
@@ -380,10 +384,14 @@ class InviteCodeTests(TestCase):
             f'https://t.me/KruzhokTeamBot?startapp=invite_{invite.code}',
         )
 
-    @override_settings(TELEGRAM_BOT_USERNAME='')
+    @override_settings(
+        TELEGRAM_BOT_USERNAME='',
+        TELEGRAM_ADMIN_IDS=frozenset({700000001}),
+    )
     def test_invite_link_falls_back_to_web_url_without_bot_username(self):
+        self.user.telegram_id = 700000001
         self.user.is_verified = True
-        self.user.save(update_fields=['is_verified'])
+        self.user.save(update_fields=['telegram_id', 'is_verified'])
         invite = InviteCode.objects.create(created_by=self.user)
 
         response = self.client.get(reverse('invite_list'))
@@ -392,6 +400,17 @@ class InviteCodeTests(TestCase):
             response,
             f'http://testserver{reverse("invite_link", args=[invite.code])}',
         )
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset())
+    def test_verified_non_admin_cannot_open_or_create_invitations(self):
+        self.user.is_verified = True
+        self.user.save(update_fields=['is_verified'])
+
+        list_response = self.client.get(reverse('invite_list'))
+        create_response = self.client.post(reverse('invite_create'))
+
+        self.assertEqual(list_response.status_code, 403)
+        self.assertEqual(create_response.status_code, 403)
 
 
 class DevAccountSwitcherTests(TestCase):
@@ -555,11 +574,30 @@ class TaskCrudTests(TestCase):
 
     def test_status_task_returns_updated_card(self):
         task = Task.objects.create(title='Task 4', description='Desc', project=self.project, creator=self.user)
-        response = self.client.post(reverse('task_status', args=[task.id]))
+        response = self.client.post(
+            reverse('task_status', args=[task.id]),
+            {'status': Task.Status.DONE},
+        )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'В процессе')
+        self.assertContains(response, 'Выполнена')
         task.refresh_from_db()
-        self.assertEqual(task.status, 'in_progress')
+        self.assertEqual(task.status, Task.Status.DONE)
+
+    def test_status_task_rejects_unknown_value(self):
+        task = Task.objects.create(
+            title='Task invalid status',
+            project=self.project,
+            creator=self.user,
+        )
+
+        response = self.client.post(
+            reverse('task_status', args=[task.id]),
+            {'status': 'not-a-status'},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        task.refresh_from_db()
+        self.assertEqual(task.status, Task.Status.NEW)
 
 
 class ProjectCrudTests(TestCase):
@@ -713,6 +751,49 @@ class ProjectMembershipCrudTests(TestCase):
         self.assertEqual(
             self.client.get(reverse('project_detail', args=[self.project.id])).status_code,
             403,
+        )
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({737320461}))
+    def test_app_admin_can_remove_member_from_any_project(self):
+        app_admin = get_user_model().objects.create_user(
+            username='global_app_admin',
+            telegram_id=737320461,
+        )
+        membership = ProjectMembership.objects.create(
+            project=self.project,
+            user=self.candidate,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        self.client.force_login(app_admin)
+
+        detail_response = self.client.get(
+            reverse('project_detail', args=[self.project.id])
+        )
+        delete_response = self.client.delete(
+            reverse('project_member_delete', args=[membership.id])
+        )
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(
+            ProjectMembership.objects.filter(pk=membership.pk).exists()
+        )
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({737320461}))
+    def test_app_admin_cannot_remove_project_owner(self):
+        app_admin = get_user_model().objects.create_user(
+            username='global_app_admin_owner_guard',
+            telegram_id=737320461,
+        )
+        self.client.force_login(app_admin)
+
+        response = self.client.delete(
+            reverse('project_member_delete', args=[self.owner_membership.id])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(
+            ProjectMembership.objects.filter(pk=self.owner_membership.pk).exists()
         )
 
     def test_admin_cannot_manage_project_members(self):
@@ -911,7 +992,10 @@ class AccessControlRegressionTests(TestCase):
         )
         self.client.force_login(self.member)
 
-        status_response = self.client.post(reverse('task_status', args=[standalone.id]))
+        status_response = self.client.post(
+            reverse('task_status', args=[standalone.id]),
+            {'status': Task.Status.IN_PROGRESS},
+        )
         edit_response = self.client.get(reverse('task_update', args=[standalone.id]))
         delete_response = self.client.delete(reverse('task_delete', args=[standalone.id]))
 
@@ -1294,6 +1378,77 @@ class TaskDetailAndCommentsTests(TestCase):
         self.assertTrue(content.index('Первый') < content.index('Второй'))
 
 
+class ProfileTests(TestCase):
+    def setUp(self):
+        self.viewer = get_user_model().objects.create_user(
+            username='profile_viewer',
+            first_name='Зритель',
+            is_verified=True,
+        )
+        self.profile_user = get_user_model().objects.create_user(
+            username='profile_owner',
+            first_name='Анна',
+            last_name='Смирнова',
+            telegram_id=612345678,
+            photo_url='https://example.com/avatar.jpg',
+            is_verified=True,
+        )
+        self.client.force_login(self.viewer)
+
+    def test_profile_page_shows_name_username_and_avatar(self):
+        response = self.client.get(
+            reverse('profile_detail', args=[self.profile_user.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Анна Смирнова')
+        self.assertContains(response, '@profile_owner')
+        self.assertContains(response, self.profile_user.photo_url)
+        self.assertNotContains(response, str(self.profile_user.telegram_id))
+
+    def test_inactive_profile_is_not_exposed(self):
+        self.profile_user.is_active = False
+        self.profile_user.save(update_fields=['is_active'])
+
+        response = self.client.get(
+            reverse('profile_detail', args=[self.profile_user.id])
+        )
+
+        self.assertEqual(response.status_code, 404)
+
+
+class AdminNavigationTests(TestCase):
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset())
+    def test_regular_user_does_not_see_invitation_section(self):
+        user = get_user_model().objects.create_user(
+            username='regular_navigation_user',
+            is_verified=True,
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse('index'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, '>Пригласить<')
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({737320461}))
+    def test_app_admin_sees_invitation_section_and_profile_link(self):
+        app_admin = get_user_model().objects.create_user(
+            username='navigation_app_admin',
+            telegram_id=737320461,
+        )
+        self.client.force_login(app_admin)
+
+        response = self.client.get(reverse('index'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '>Пригласить<')
+        self.assertContains(
+            response,
+            reverse('profile_detail', args=[app_admin.id]),
+        )
+
+
 class DiscussionAndMessageTests(TestCase):
     def setUp(self):
         self.user1 = get_user_model().objects.create_user(username='user1', first_name='Alice', is_verified=True)
@@ -1422,6 +1577,53 @@ class DiscussionAndMessageTests(TestCase):
         response = self.client.post(reverse('message_create', args=[discussion.id]), {'text': 'Intrusion!'})
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({737320461}))
+    def test_app_admin_sees_and_deletes_any_discussion(self):
+        app_admin = get_user_model().objects.create_user(
+            username='discussion_app_admin',
+            telegram_id=737320461,
+        )
+        discussion = Discussion.objects.create(
+            title='Admin visible chat',
+            created_by=self.user2,
+        )
+        Message.objects.create(
+            discussion=discussion,
+            sender=self.user2,
+            text='Will be deleted',
+        )
+        self.client.force_login(app_admin)
+
+        list_response = self.client.get(reverse('discussion_list'))
+        detail_response = self.client.get(
+            reverse('discussion_detail', args=[discussion.id])
+        )
+        delete_response = self.client.delete(
+            reverse('discussion_delete', args=[discussion.id])
+        )
+
+        self.assertContains(list_response, discussion.title)
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(Discussion.objects.filter(pk=discussion.pk).exists())
+        self.assertFalse(
+            Message.objects.filter(discussion_id=discussion.pk).exists()
+        )
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset())
+    def test_regular_participant_cannot_delete_discussion(self):
+        discussion = Discussion.objects.create(
+            title='Protected from participant',
+            created_by=self.user1,
+        )
+
+        response = self.client.delete(
+            reverse('discussion_delete', args=[discussion.id])
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Discussion.objects.filter(pk=discussion.pk).exists())
+
 
 class HtmxModalErrorRetargetTests(TestCase):
     def setUp(self):
@@ -1516,13 +1718,20 @@ class NotificationTests(TestCase):
     def deadline_input(self, value):
         return timezone.localtime(value).strftime('%Y-%m-%dT%H:%M')
 
-    def task_form_data(self, *, title, deadline, status=Task.Status.NEW):
+    def task_form_data(
+        self,
+        *,
+        title,
+        deadline,
+        status=Task.Status.NEW,
+        assignee=None,
+    ):
         return {
             'title': title,
             'description': '',
             'project': '',
             'stage': '',
-            'assignee': self.user.id,
+            'assignee': (assignee or self.user).id,
             'deadline': self.deadline_input(deadline),
             'status': status,
         }
@@ -1768,4 +1977,93 @@ class NotificationTests(TestCase):
         self.assertEqual(
             send_message.call_args.args[0],
             self.user.telegram_id,
+        )
+
+    @override_settings(
+        TELEGRAM_NOTIFICATION_MAX_ATTEMPTS=3,
+        TELEGRAM_NOTIFICATION_RETRY_SECONDS=0,
+    )
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_failed_notification_is_retried_by_deadline_worker(
+        self,
+        send_message,
+    ):
+        send_message.side_effect = [
+            (False, 'Temporary Bot API failure'),
+            (True, ''),
+        ]
+        task = Task.objects.create(
+            title='Повторная отправка',
+            creator=self.user,
+            assignee=self.user,
+            deadline=timezone.now() + timedelta(days=2),
+        )
+        notification = notify(task, Notification.Kind.DEADLINE_SET)
+        self.assertEqual(notification.status, Notification.Status.FAILED)
+        self.assertEqual(notification.attempt_count, 1)
+
+        call_command('check_deadlines', stdout=StringIO())
+
+        notification.refresh_from_db()
+        self.assertEqual(notification.status, Notification.Status.SENT)
+        self.assertEqual(notification.attempt_count, 2)
+        self.assertIsNone(notification.next_retry_at)
+        self.assertEqual(send_message.call_count, 2)
+
+    @patch('core.telegram_notifications.send_telegram_message')
+    def test_reassigning_task_resets_notifications_for_new_recipient(
+        self,
+        send_message,
+    ):
+        send_message.return_value = (True, '')
+        new_assignee = get_user_model().objects.create_user(
+            username='new_notification_recipient',
+            telegram_id=876543210,
+            is_verified=True,
+        )
+        deadline = (timezone.now() + timedelta(days=2)).replace(
+            second=0,
+            microsecond=0,
+        )
+        task = Task.objects.create(
+            title='Переназначаемая задача',
+            creator=self.user,
+            assignee=self.user,
+            deadline=deadline,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_SET,
+            status=Notification.Status.SENT,
+            attempt_count=1,
+        )
+        Notification.objects.create(
+            task=task,
+            recipient=self.user,
+            kind=Notification.Kind.DEADLINE_APPROACHING,
+            status=Notification.Status.SENT,
+            attempt_count=1,
+        )
+
+        response = self.client.post(
+            reverse('task_update', args=[task.id]),
+            self.task_form_data(
+                title=task.title,
+                deadline=deadline,
+                assignee=new_assignee,
+            ),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        notifications = task.notifications.all()
+        self.assertEqual(notifications.count(), 1)
+        replacement = notifications.get()
+        self.assertEqual(replacement.kind, Notification.Kind.DEADLINE_SET)
+        self.assertEqual(replacement.recipient, new_assignee)
+        self.assertEqual(replacement.status, Notification.Status.SENT)
+        send_message.assert_called_once()
+        self.assertEqual(
+            send_message.call_args.args[0],
+            new_assignee.telegram_id,
         )

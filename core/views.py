@@ -18,7 +18,7 @@ from django.utils.html import escape
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
-from .access import redeem_invite_code, user_has_access
+from .access import is_app_admin, redeem_invite_code, user_has_access
 from .forms import (
     CommentForm,
     DiscussionForm,
@@ -42,7 +42,7 @@ from .models import (
     Task,
     TelegramUser,
 )
-from .decorators import require_verified_user, verified_login_required
+from .decorators import app_admin_required, require_verified_user, verified_login_required
 from .permissions import (
     get_accessible_projects,
     get_accessible_tasks,
@@ -256,7 +256,7 @@ def invite_link(request, code):
     return redirect('invite_redeem' if request.user.is_authenticated else 'index')
 
 
-@verified_login_required
+@app_admin_required
 def invite_list(request):
     now = timezone.now()
     invites = (
@@ -281,11 +281,21 @@ def invite_list(request):
     return render(request, 'core/invites/list.html', {'invite_rows': invite_rows})
 
 
-@verified_login_required
+@app_admin_required
 @require_POST
 def invite_create(request):
     InviteCode.objects.create(created_by=request.user)
     return redirect('invite_list')
+
+
+@login_required
+def profile_detail(request, user_id):
+    profile_user = get_object_or_404(TelegramUser, pk=user_id, is_active=True)
+    return render(
+        request,
+        'core/users/profile.html',
+        {'profile_user': profile_user},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -410,6 +420,7 @@ def task_update(request, task_id):
     task = get_task_or_403(task_id, request.user, permission='edit')
     old_deadline = task.deadline
     old_status = task.status
+    old_assignee_id = task.assignee_id
     return_to = request.POST.get('return_to') or request.GET.get('return_to')
 
     if request.method == 'POST':
@@ -417,11 +428,13 @@ def task_update(request, task_id):
         if form.is_valid():
             task = form.save()
             deadline_changed = old_deadline != task.deadline
+            assignee_changed = old_assignee_id != task.assignee_id
             completed = (
                 old_status != Task.Status.DONE
                 and task.status == Task.Status.DONE
             )
-            if deadline_changed:
+            notifications_reset = deadline_changed or assignee_changed
+            if notifications_reset:
                 task.notifications.filter(
                     kind__in=[
                         Notification.Kind.DEADLINE_SET,
@@ -436,7 +449,11 @@ def task_update(request, task_id):
                         Notification.Kind.DEADLINE_OVERDUE,
                     ]
                 ).delete()
-            if deadline_changed and task.deadline:
+            if (
+                notifications_reset
+                and task.deadline
+                and task.status != Task.Status.DONE
+            ):
                 notify(task, Notification.Kind.DEADLINE_SET)
             if return_to == 'project':
                 redirect_url = (
@@ -488,15 +505,13 @@ def task_delete(request, task_id):
 @login_required
 @require_POST
 def task_status(request, task_id):
-    """
-    POST /tasks/<id>/status/
-    Кнопка "Статус" в card.html не передаёт конкретное значение (нет hx-vals),
-    поэтому статус просто циклически переключается: новая -> в процессе ->
-    выполнена -> снова новая. Возвращает обновлённую карточку для outerHTML.
-    """
+    """Устанавливает явно выбранный статус и возвращает карточку для HTMX."""
     task = get_task_or_403(task_id, request.user, permission='status')
-    order = [Task.Status.NEW, Task.Status.IN_PROGRESS, Task.Status.DONE]
-    task.status = order[(order.index(task.status) + 1) % len(order)]
+    new_status = request.POST.get('status')
+    if new_status not in Task.Status.values:
+        return HttpResponse('Недопустимый статус.', status=400)
+
+    task.status = new_status
     task.save()
     if task.status == Task.Status.DONE:
         task.notifications.filter(
@@ -767,14 +782,16 @@ def project_member_update(request, membership_id):
 @require_http_methods(['DELETE'])
 def project_member_delete(request, membership_id):
     membership = get_object_or_404(
-        ProjectMembership.objects.select_related('project'),
+        ProjectMembership.objects.select_related('project', 'user'),
         pk=membership_id,
     )
-    project = get_project_or_403(
-        membership.project_id,
-        request.user,
-        required_role='owner',
-    )
+    project = membership.project
+    if not is_app_admin(request.user):
+        project = get_project_or_403(
+            membership.project_id,
+            request.user,
+            required_role='owner',
+        )
     if membership.user_id == project.owner_id:
         raise PermissionDenied
     membership.delete()
@@ -896,9 +913,13 @@ def stage_delete(request, stage_id):
 
 @login_required
 def discussion_list(request):
-    discussions = Discussion.objects.filter(
-        models.Q(created_by=request.user) | models.Q(participants=request.user)
-    ).distinct().prefetch_related('messages').order_by('-created_at')
+    discussions = Discussion.objects.all()
+    if not is_app_admin(request.user):
+        discussions = discussions.filter(
+            models.Q(created_by=request.user)
+            | models.Q(participants=request.user)
+        ).distinct()
+    discussions = discussions.prefetch_related('messages').order_by('-created_at')
     return render(request, 'core/discussions/list.html', {'discussions': discussions})
 
 
@@ -931,6 +952,18 @@ def discussion_detail(request, discussion_id):
         'messages': messages,
         'form': form,
     })
+
+
+@app_admin_required
+@require_http_methods(['DELETE'])
+def discussion_delete(request, discussion_id):
+    discussion = get_object_or_404(Discussion, pk=discussion_id)
+    discussion.delete()
+    if request.GET.get('redirect') == '1':
+        return HttpResponse(
+            headers={'HX-Redirect': reverse('discussion_list')}
+        )
+    return HttpResponse(status=200)
 
 
 @login_required

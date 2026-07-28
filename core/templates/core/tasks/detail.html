@@ -31,7 +31,7 @@
           <div class="definition-list detail-definitions">
             <div class="definition-item">
               <div class="definition-item__label">Ответственный</div>
-              <div class="definition-item__value">{% if task.assignee %}{{ task.assignee.display_name }}{% else %}Не назначен{% endif %}</div>
+              <div class="definition-item__value">{% if task.assignee %}<a href="{% url 'profile_detail' task.assignee.id %}">{{ task.assignee.display_name }}</a>{% else %}Не назначен{% endif %}</div>
             </div>
             <div class="definition-item">
               <div class="definition-item__label">Дедлайн</div>

@@ -41,10 +41,12 @@
                     <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/><path d="M8 8h8M8 12h5"/></svg>
                     <span>Обсуждения</span>
                 </a>
+                {% if is_app_admin %}
                 <a href="{% url 'invite_list' %}" class="app-nav__link {% if 'invite' in current %}is-active{% endif %}">
                     <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15v6m-3-3h6M7 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm10 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6ZM3.5 20a3.5 3.5 0 0 1 7 0m3 0a3.5 3.5 0 0 1 7 0"/></svg>
                     <span>Пригласить</span>
                 </a>
+                {% endif %}
             </div>
 
             <div class="app-user">
@@ -61,6 +63,7 @@
                         </svg>
                     </summary>
                     <div class="account-switcher__menu">
+                        <a href="{% url 'profile_detail' user.id %}" class="account-switcher__profile-link">Открыть профиль</a>
                         <div class="account-switcher__title">Тестовые аккаунты</div>
                         {% for account in dev_accounts %}
                         <form method="post" action="{% url 'dev_switch_account' account.id %}">
@@ -82,8 +85,14 @@
                     </div>
                 </details>
                 {% else %}
-                    <div class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</div>
-                    <div class="app-user__name">{{ user.display_name }}</div>
+                    <a href="{% url 'profile_detail' user.id %}" class="app-user__profile-link">
+                        {% if user.photo_url %}
+                            <img class="app-user__avatar" src="{{ user.photo_url }}" alt="">
+                        {% else %}
+                            <span class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</span>
+                        {% endif %}
+                        <span class="app-user__name">{{ user.display_name }}</span>
+                    </a>
                 {% endif %}
             </div>
         </nav>

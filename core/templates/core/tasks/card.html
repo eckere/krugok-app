@@ -12,7 +12,7 @@
     {% if task.description %}<div class="entity-card__description">{{ task.description }}</div>{% endif %}
     <div class="entity-card__meta">
       {% if task.project %}<span>{{ task.project.name }}</span>{% endif %}
-      {% if task.assignee %}<span>Ответственный: {{ task.assignee.display_name }}</span>{% else %}<span>Не назначена</span>{% endif %}
+      {% if task.assignee %}<span>Ответственный: <a href="{% url 'profile_detail' task.assignee.id %}">{{ task.assignee.display_name }}</a></span>{% else %}<span>Не назначена</span>{% endif %}
       {% if task.deadline %}
         <span {% if task.is_overdue %}class="meta-danger"{% endif %}>До {{ task.deadline|date:'d.m.Y, H:i' }}</span>
       {% else %}
@@ -29,12 +29,20 @@
               class="btn btn-secondary btn-sm">Изменить</button>
       {% endif %}
       {% if task|can_update_task_status:user %}
-      <button type="button"
-              hx-post="{% url 'task_status' task.id %}"
-              {% if task_project_context %}hx-vals='{"return_to": "project"}'{% endif %}
-              hx-target="#task-{{ task.id }}"
-              hx-swap="outerHTML"
-              class="btn btn-secondary btn-sm">Статус</button>
+      <label class="status-control">
+        <span class="sr-only">Статус задачи {{ task.title }}</span>
+        <select name="status"
+                hx-post="{% url 'task_status' task.id %}"
+                hx-trigger="change"
+                {% if task_project_context %}hx-vals='{"return_to": "project"}'{% endif %}
+                hx-target="#task-{{ task.id }}"
+                hx-swap="outerHTML"
+                class="status-select">
+          <option value="new" {% if task.status == 'new' %}selected{% endif %}>Новая</option>
+          <option value="in_progress" {% if task.status == 'in_progress' %}selected{% endif %}>В процессе</option>
+          <option value="done" {% if task.status == 'done' %}selected{% endif %}>Выполнена</option>
+        </select>
+      </label>
       {% endif %}
       {% if task|can_manage_task:user %}
       <button type="button" hx-delete="{% url 'task_delete' task.id %}" hx-target="#task-{{ task.id }}" hx-swap="outerHTML" hx-confirm="Удалить задачу?" class="btn btn-danger btn-sm">Удалить</button>

@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ profile_user.display_name }} — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <div class="page-header__eyebrow">Профиль</div>
+      <h1 class="page-header__title">{{ profile_user.display_name }}</h1>
+      {% if profile_user.username %}
+        <p class="page-header__subtitle">@{{ profile_user.username }}</p>
+      {% endif %}
+    </div>
+    <div class="page-header__actions">
+      <a href="{% url 'index' %}" class="btn btn-secondary">На главную</a>
+    </div>
+  </header>
+
+  <section class="panel profile-card">
+    <div class="profile-card__avatar">
+      {% if profile_user.photo_url %}
+        <img src="{{ profile_user.photo_url }}" alt="Аватар {{ profile_user.display_name }}">
+      {% else %}
+        <span>{{ profile_user.first_name|default:profile_user.username|first|upper }}</span>
+      {% endif %}
+    </div>
+    <div class="profile-card__content">
+      <h2>{{ profile_user.display_name }}</h2>
+      {% if profile_user.username %}
+        <div class="profile-card__username">@{{ profile_user.username }}</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

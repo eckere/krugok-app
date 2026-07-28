@@ -1,8 +1,14 @@
 <article id="comment-{{ comment.id }}" class="comment">
-  <div class="comment__avatar">{{ comment.author.first_name|default:comment.author.username|first|upper }}</div>
+  <a href="{% url 'profile_detail' comment.author.id %}" aria-label="Профиль {{ comment.author.display_name }}">
+    {% if comment.author.photo_url %}
+      <img class="comment__avatar" src="{{ comment.author.photo_url }}" alt="">
+    {% else %}
+      <span class="comment__avatar">{{ comment.author.first_name|default:comment.author.username|first|upper }}</span>
+    {% endif %}
+  </a>
   <div class="comment__content">
     <div class="comment__header">
-      <strong>{{ comment.author.display_name }}</strong>
+      <a href="{% url 'profile_detail' comment.author.id %}"><strong>{{ comment.author.display_name }}</strong></a>
       <time>{{ comment.created_at|date:'d.m.Y, H:i' }}</time>
     </div>
     <div class="comment__text">{{ comment.text|linebreaksbr }}</div>

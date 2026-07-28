@@ -3,6 +3,7 @@ import socket
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import timedelta
 
 from django.conf import settings
 from django.utils import timezone
@@ -95,24 +96,73 @@ def _notification_text(task: Task, kind: str) -> str:
 
 def notify(task: Task, kind: str) -> Notification | None:
     recipient = task.assignee or task.creator
+    now = timezone.now()
     notification, created = Notification.objects.get_or_create(
         task=task,
         kind=kind,
         defaults={'recipient': recipient},
     )
-    if not created:
-        return notification
+
+    if not created and notification.recipient_id != recipient.id:
+        notification.recipient = recipient
+        notification.status = Notification.Status.PENDING
+        notification.error_message = ''
+        notification.attempt_count = 0
+        notification.last_attempt_at = None
+        notification.next_retry_at = None
+        notification.sent_at = None
+        notification.save(
+            update_fields=[
+                'recipient',
+                'status',
+                'error_message',
+                'attempt_count',
+                'last_attempt_at',
+                'next_retry_at',
+                'sent_at',
+            ]
+        )
+    elif not created:
+        if notification.status == Notification.Status.SENT:
+            return notification
+        if (
+            notification.status == Notification.Status.PENDING
+            and notification.attempt_count > 0
+        ):
+            return notification
+        if notification.attempt_count >= settings.TELEGRAM_NOTIFICATION_MAX_ATTEMPTS:
+            return notification
+        if notification.next_retry_at and notification.next_retry_at > now:
+            return notification
 
     success, error_message = send_telegram_message(
         recipient.telegram_id,
         _notification_text(task, kind),
     )
+    notification.attempt_count += 1
+    notification.last_attempt_at = now
     notification.status = (
         Notification.Status.SENT if success else Notification.Status.FAILED
     )
     notification.error_message = error_message
-    notification.sent_at = timezone.now() if success else None
+    notification.sent_at = now if success else None
+    notification.next_retry_at = None
+    if (
+        not success
+        and notification.attempt_count
+        < settings.TELEGRAM_NOTIFICATION_MAX_ATTEMPTS
+    ):
+        notification.next_retry_at = now + timedelta(
+            seconds=settings.TELEGRAM_NOTIFICATION_RETRY_SECONDS
+        )
     notification.save(
-        update_fields=['status', 'error_message', 'sent_at']
+        update_fields=[
+            'status',
+            'error_message',
+            'attempt_count',
+            'last_attempt_at',
+            'next_retry_at',
+            'sent_at',
+        ]
     )
     return notification

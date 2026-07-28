@@ -1,10 +1,11 @@
 from functools import wraps
 
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.shortcuts import redirect
 from django.urls import reverse
 
-from .access import redeem_invite_code, user_has_access
+from .access import is_app_admin, redeem_invite_code, user_has_access
 from .telegram_auth import extract_invite_code_from_start_param
 
 
@@ -43,3 +44,16 @@ def verified_login_required(view_func):
     from django.contrib.auth.decorators import login_required
 
     return login_required(require_verified_user(view_func))
+
+
+def app_admin_required(view_func):
+    """Разрешает view только глобальному администратору приложения."""
+
+    @verified_login_required
+    @wraps(view_func)
+    def wrapped_view(request, *args, **kwargs):
+        if not is_app_admin(request.user):
+            raise PermissionDenied
+        return view_func(request, *args, **kwargs)
+
+    return wrapped_view

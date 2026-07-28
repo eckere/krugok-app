@@ -141,6 +141,38 @@ def dev_switch_account(request, user_id):
     return redirect('index')
 
 
+def _redeem_invite_code(user, code) -> bool:
+    """Атомарно погашает одноразовое приглашение для пользователя."""
+    now = timezone.now()
+    with transaction.atomic():
+        invite = (
+            InviteCode.objects.select_for_update()
+            .filter(code=code, is_active=True, used_by__isnull=True)
+            .filter(
+                models.Q(expires_at__isnull=True)
+                | models.Q(expires_at__gt=now)
+            )
+            .first()
+        )
+        if invite is None:
+            return False
+
+        TelegramUser.objects.filter(pk=user.pk).update(is_verified=True)
+        InviteCode.objects.filter(pk=invite.pk).update(
+            used_by=user,
+            used_at=now,
+            is_active=False,
+        )
+        user.is_verified = True
+        return True
+
+
+def _telegram_login_response(redirect_url=None):
+    return JsonResponse(
+        {'success': True, 'redirect_url': redirect_url or reverse('index')}
+    )
+
+
 @require_POST
 def auth_telegram(request):
     """
@@ -164,14 +196,19 @@ def auth_telegram(request):
         return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
     invite_code = extract_invite_code(init_data)
-    if invite_code:
-        request.session['pending_invite_code'] = invite_code
+    user = _login_telegram_user(request, tg_user)
 
-    return _login_telegram_user(
-        request,
-        tg_user,
-        redirect_url=reverse('invite_redeem') if invite_code else reverse('index'),
-    )
+    if invite_code and not user_has_access(user):
+        if _redeem_invite_code(user, invite_code):
+            request.session.pop('pending_invite_code', None)
+            return _telegram_login_response(reverse('index'))
+
+        # Недействительный startapp не раскрывает причину отказа. Оставляем
+        # прежнюю ручную форму как безопасный запасной сценарий.
+        request.session['pending_invite_code'] = invite_code
+        return _telegram_login_response(reverse('invite_redeem'))
+
+    return _telegram_login_response(reverse('index'))
 
 
 @require_POST
@@ -189,10 +226,11 @@ def auth_telegram_widget(request):
         logger.warning('Отклонена попытка входа через Telegram Login Widget: %s', exc)
         return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
-    return _login_telegram_user(request, tg_user)
+    _login_telegram_user(request, tg_user)
+    return _telegram_login_response()
 
 
-def _login_telegram_user(request, tg_user, *, redirect_url=None):
+def _login_telegram_user(request, tg_user):
     """Обновляет профиль и создаёт Django-сессию после проверки Telegram."""
     telegram_id = tg_user['id']
     username = tg_user.get('username') or f'tg_{telegram_id}'
@@ -207,9 +245,7 @@ def _login_telegram_user(request, tg_user, *, redirect_url=None):
         },
     )
     login(request, user)
-    return JsonResponse(
-        {'success': True, 'redirect_url': redirect_url or reverse('index')}
-    )
+    return user
 
 
 @django_login_required
@@ -221,31 +257,11 @@ def invite_redeem(request):
 
     if request.method == 'POST':
         form = InviteCodeRedeemForm(request.POST)
-        if form.is_valid():
-            code = form.cleaned_data['code']
-            now = timezone.now()
-            with transaction.atomic():
-                invite = (
-                    InviteCode.objects.select_for_update()
-                    .filter(code=code, is_active=True, used_by__isnull=True)
-                    .filter(
-                        models.Q(expires_at__isnull=True)
-                        | models.Q(expires_at__gt=now)
-                    )
-                    .first()
-                )
-                if invite is not None:
-                    TelegramUser.objects.filter(pk=request.user.pk).update(
-                        is_verified=True
-                    )
-                    InviteCode.objects.filter(pk=invite.pk).update(
-                        used_by=request.user,
-                        used_at=now,
-                        is_active=False,
-                    )
-                    request.user.is_verified = True
-                    request.session.pop('pending_invite_code', None)
-                    return redirect('index')
+        if form.is_valid() and _redeem_invite_code(
+            request.user, form.cleaned_data['code']
+        ):
+            request.session.pop('pending_invite_code', None)
+            return redirect('index')
 
         # Одна и та же формулировка для несуществующего, истёкшего и уже
         # использованного кода не раскрывает состояние приглашения.

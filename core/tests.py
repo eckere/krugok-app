@@ -121,7 +121,7 @@ class TelegramAuthenticationTests(TestCase):
                 self.assertFalse('_auth_user_id' in self.client.session)
 
     @patch('core.views.validate_init_data')
-    def test_startapp_invite_is_saved_and_redirects_to_redeem(
+    def test_startapp_invite_is_redeemed_automatically(
         self, validate_init_data
     ):
         invite = InviteCode.objects.create()
@@ -144,10 +144,41 @@ class TelegramAuthenticationTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['redirect_url'], reverse('index'))
+        user = get_user_model().objects.get(telegram_id=246813579)
+        invite.refresh_from_db()
+        self.assertTrue(user.is_verified)
+        self.assertEqual(invite.used_by, user)
+        self.assertFalse(invite.is_active)
+        self.assertNotIn('pending_invite_code', self.client.session)
+
+    @patch('core.views.validate_init_data')
+    def test_invalid_startapp_invite_falls_back_to_redeem_form(
+        self, validate_init_data
+    ):
+        validate_init_data.return_value = {
+            'id': 975318642,
+            'username': 'invalid_invite_user',
+        }
+        missing_code = 'missing-invite-code'
+
+        response = self.client.post(
+            reverse('auth_telegram'),
+            data=json.dumps(
+                {
+                    'init_data': (
+                        f'auth_date=1&start_param=invite_{missing_code}'
+                    )
+                }
+            ),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['redirect_url'], reverse('invite_redeem'))
         self.assertEqual(
             self.client.session['pending_invite_code'],
-            invite.code,
+            missing_code,
         )
 
     @patch('core.views.validate_init_data')

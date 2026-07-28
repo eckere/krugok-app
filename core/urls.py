@@ -4,6 +4,10 @@ from . import views
 
 urlpatterns = [
     path('healthz/', views.healthcheck, name='healthcheck'),
+    path('readyz/', views.readiness, name='readiness'),
+    path('privacy/', views.privacy_policy, name='privacy_policy'),
+    path('terms/', views.terms_of_use, name='terms_of_use'),
+    path('ops/status/', views.operational_status, name='operational_status'),
     path('', views.index, name='index'),
     path('dev-login/', views.dev_login, name='dev_login'),
     path('dev-switch-account/<int:user_id>/', views.dev_switch_account, name='dev_switch_account'),
@@ -13,7 +17,11 @@ urlpatterns = [
     path('invite/<str:code>/', views.invite_link, name='invite_link'),
     path('invites/', views.invite_list, name='invite_list'),
     path('invites/create/', views.invite_create, name='invite_create'),
+    path('invites/<int:invite_id>/revoke/', views.invite_revoke, name='invite_revoke'),
     path('users/<int:user_id>/', views.profile_detail, name='profile_detail'),
+    path('account/settings/', views.profile_settings, name='profile_settings'),
+    path('account/logout/', views.account_logout, name='account_logout'),
+    path('account/delete/', views.account_delete, name='account_delete'),
 
     path('tasks/', views.task_list, name='task_list'),
     path('tasks/create/', views.task_create, name='task_create'),
@@ -26,6 +34,8 @@ urlpatterns = [
     path('projects/create/', views.project_create, name='project_create'),
     path('projects/<int:project_id>/', views.project_detail, name='project_detail'),
     path('projects/<int:project_id>/archive/', views.project_archive, name='project_archive'),
+    path('projects/<int:project_id>/restore/', views.project_restore, name='project_restore'),
+    path('projects/<int:project_id>/transfer/', views.project_transfer_ownership, name='project_transfer_ownership'),
     path('projects/<int:project_id>/edit/', views.project_update, name='project_update'),
     path('projects/<int:project_id>/delete/', views.project_delete, name='project_delete'),
     path('projects/<int:project_id>/members/create/', views.project_member_create, name='project_member_create'),
@@ -35,6 +45,7 @@ urlpatterns = [
     path('projects/<int:project_id>/stages/create/', views.stage_create, name='stage_create'),
     path('stages/<int:stage_id>/edit/', views.stage_update, name='stage_update'),
     path('stages/<int:stage_id>/archive/', views.stage_archive, name='stage_archive'),
+    path('stages/<int:stage_id>/restore/', views.stage_restore, name='stage_restore'),
     path('stages/<int:stage_id>/delete/', views.stage_delete, name='stage_delete'),
 
     path('tasks/<int:task_id>/', views.task_detail, name='task_detail'),
@@ -45,5 +56,7 @@ urlpatterns = [
     path('discussions/<int:discussion_id>/', views.discussion_detail, name='discussion_detail'),
     path('discussions/<int:discussion_id>/delete/', views.discussion_delete, name='discussion_delete'),
     path('discussions/<int:discussion_id>/messages/create/', views.message_create, name='message_create'),
+    path('messages/<int:message_id>/edit/', views.message_update, name='message_update'),
+    path('messages/<int:message_id>/delete/', views.message_delete, name='message_delete'),
     path('discussions/<int:discussion_id>/messages/poll/', views.discussion_messages_poll, name='discussion_messages_poll'),
 ]

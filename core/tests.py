@@ -16,6 +16,7 @@ from .models import (
     InviteCode,
     Message,
     Notification,
+    OutboundMessage,
     Project,
     ProjectMembership,
     Stage,
@@ -25,7 +26,7 @@ from .telegram_auth import (
     InitDataValidationError,
     LoginWidgetValidationError,
 )
-from .telegram_notifications import notify
+from .telegram_notifications import notify, process_outbound
 
 
 class HealthcheckTests(TestCase):
@@ -56,7 +57,8 @@ class TelegramAuthenticationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'success': True, 'redirect_url': reverse('index')})
         user = get_user_model().objects.get(telegram_id=987654321)
-        self.assertEqual(user.username, 'telegram_user')
+        self.assertEqual(user.username, 'tg_987654321')
+        self.assertEqual(user.telegram_username, 'telegram_user')
         self.assertEqual(user.first_name, 'Ирина')
         self.assertEqual(user.last_name, 'Тестова')
         self.assertEqual(user.photo_url, 'https://example.com/avatar.jpg')
@@ -89,7 +91,8 @@ class TelegramAuthenticationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
-        self.assertEqual(user.username, 'new_username')
+        self.assertEqual(user.username, 'tg_123456789')
+        self.assertEqual(user.telegram_username, 'new_username')
         self.assertEqual(user.first_name, 'Новое')
         self.assertEqual(user.photo_url, 'https://example.com/new-avatar.jpg')
         self.assertEqual(get_user_model().objects.count(), 1)
@@ -243,7 +246,8 @@ class TelegramAuthenticationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'success': True, 'redirect_url': reverse('index')})
         user = get_user_model().objects.get(telegram_id=765432198)
-        self.assertEqual(user.username, 'widget_user')
+        self.assertEqual(user.username, 'tg_765432198')
+        self.assertEqual(user.telegram_username, 'widget_user')
         self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
 
     @patch('core.views.validate_login_widget_data')
@@ -261,7 +265,7 @@ class TelegramAuthenticationTests(TestCase):
         self.assertFalse('_auth_user_id' in self.client.session)
 
     @override_settings(DEBUG=True)
-    def test_dev_login_still_logs_in_but_requires_invitation(self):
+    def test_dev_login_creates_verified_local_account(self):
         response = self.client.get(reverse('dev_login'))
 
         self.assertRedirects(
@@ -271,7 +275,8 @@ class TelegramAuthenticationTests(TestCase):
         )
         user = get_user_model().objects.get(telegram_id=111222333)
         self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
-        self.assertFalse(user.is_verified)
+        self.assertTrue(user.is_verified)
+        self.assertEqual(self.client.get(reverse('index')).status_code, 200)
 
 
 class InviteCodeTests(TestCase):
@@ -505,8 +510,13 @@ class StageAndProjectTests(TestCase):
         stage.refresh_from_db()
         self.assertTrue(stage.is_archived)
 
-    def test_stage_delete_removes_stage(self):
-        stage = Stage.objects.create(project=self.project, name='Удаляемый', order=1)
+    def test_archived_stage_delete_removes_stage(self):
+        stage = Stage.objects.create(
+            project=self.project,
+            name='Удаляемый',
+            order=None,
+            is_archived=True,
+        )
         response = self.client.delete(reverse('stage_delete', args=[stage.id]))
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Stage.objects.filter(pk=stage.pk).exists())
@@ -689,6 +699,11 @@ class ProjectMembershipCrudTests(TestCase):
             user=self.admin,
             role=ProjectMembership.Role.ADMIN,
         )
+        shared_discussion = Discussion.objects.create(
+            title='Existing working context',
+            created_by=self.owner,
+        )
+        shared_discussion.participants.add(self.owner, self.candidate)
 
     def test_members_relation_uses_project_membership_as_source(self):
         self.assertIn(self.owner, self.project.members.all())
@@ -1370,8 +1385,8 @@ class TaskDetailAndCommentsTests(TestCase):
         self.assertContains(response, 'Комментарий', status_code=422)
 
     def test_comments_are_ordered_by_created_at(self):
-        first = Comment.objects.create(task=self.task, author=self.user, text='Первый')
-        second = Comment.objects.create(task=self.task, author=self.user, text='Второй')
+        Comment.objects.create(task=self.task, author=self.user, text='Первый')
+        Comment.objects.create(task=self.task, author=self.user, text='Второй')
         response = self.client.get(reverse('task_detail', args=[self.task.id]))
         self.assertEqual(response.status_code, 200)
         content = response.content.decode('utf-8')
@@ -1387,12 +1402,18 @@ class ProfileTests(TestCase):
         )
         self.profile_user = get_user_model().objects.create_user(
             username='profile_owner',
+            telegram_username='profile_owner',
             first_name='Анна',
             last_name='Смирнова',
             telegram_id=612345678,
             photo_url='https://example.com/avatar.jpg',
             is_verified=True,
         )
+        shared_discussion = Discussion.objects.create(
+            title='Shared profile context',
+            created_by=self.viewer,
+        )
+        shared_discussion.participants.add(self.viewer, self.profile_user)
         self.client.force_login(self.viewer)
 
     def test_profile_page_shows_name_username_and_avatar(self):
@@ -1455,6 +1476,22 @@ class DiscussionAndMessageTests(TestCase):
         self.user2 = get_user_model().objects.create_user(username='user2', first_name='Bob', is_verified=True)
         self.user3 = get_user_model().objects.create_user(username='user3', first_name='Charlie', is_verified=True)
         self.task = Task.objects.create(title='Test Task', creator=self.user1)
+        project = Project.objects.create(name='Shared workspace', owner=self.user1)
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.user1,
+            role=ProjectMembership.Role.OWNER,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.user2,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.user3,
+            role=ProjectMembership.Role.MEMBER,
+        )
 
         self.client.force_login(self.user1)
 
@@ -1737,7 +1774,7 @@ class NotificationTests(TestCase):
         }
 
     @patch('core.telegram_notifications.send_telegram_message')
-    def test_task_create_with_deadline_sends_notification(self, send_message):
+    def test_task_create_with_deadline_queues_notification(self, send_message):
         send_message.return_value = (True, '')
         deadline = (timezone.now() + timedelta(days=2)).replace(
             second=0,
@@ -1757,9 +1794,12 @@ class NotificationTests(TestCase):
         notification = task.notifications.get(
             kind=Notification.Kind.DEADLINE_SET
         )
-        self.assertEqual(notification.status, Notification.Status.SENT)
-        self.assertIsNotNone(notification.sent_at)
-        send_message.assert_called_once()
+        self.assertEqual(notification.status, Notification.Status.PENDING)
+        self.assertIsNone(notification.sent_at)
+        self.assertTrue(
+            OutboundMessage.objects.filter(notification=notification).exists()
+        )
+        send_message.assert_not_called()
 
     @patch('core.telegram_notifications.send_telegram_message')
     def test_task_create_survives_notification_failure(self, send_message):
@@ -1785,6 +1825,8 @@ class NotificationTests(TestCase):
         notification = task.notifications.get(
             kind=Notification.Kind.DEADLINE_SET
         )
+        process_outbound()
+        notification.refresh_from_db()
         self.assertEqual(notification.status, Notification.Status.FAILED)
         self.assertIn("can't initiate", notification.error_message)
         self.assertIsNone(notification.sent_at)
@@ -1846,6 +1888,12 @@ class NotificationTests(TestCase):
             kind=Notification.Kind.DEADLINE_SET
         )
         self.assertEqual(deadline_notifications.count(), 1)
+        self.assertEqual(
+            deadline_notifications.get().status,
+            Notification.Status.PENDING,
+        )
+        send_message.assert_not_called()
+        process_outbound()
         self.assertEqual(
             deadline_notifications.get().status,
             Notification.Status.SENT,
@@ -1974,10 +2022,13 @@ class NotificationTests(TestCase):
         )
 
         self.assertEqual(notification.recipient, self.user)
-        self.assertEqual(
-            send_message.call_args.args[0],
-            self.user.telegram_id,
+        self.assertTrue(
+            OutboundMessage.objects.filter(
+                notification=notification,
+                recipient=self.user,
+            ).exists()
         )
+        send_message.assert_not_called()
 
     @override_settings(
         TELEGRAM_NOTIFICATION_MAX_ATTEMPTS=3,
@@ -1999,6 +2050,9 @@ class NotificationTests(TestCase):
             deadline=timezone.now() + timedelta(days=2),
         )
         notification = notify(task, Notification.Kind.DEADLINE_SET)
+        self.assertEqual(notification.status, Notification.Status.PENDING)
+        process_outbound()
+        notification.refresh_from_db()
         self.assertEqual(notification.status, Notification.Status.FAILED)
         self.assertEqual(notification.attempt_count, 1)
 
@@ -2020,6 +2074,11 @@ class NotificationTests(TestCase):
             username='new_notification_recipient',
             telegram_id=876543210,
             is_verified=True,
+        )
+        Task.objects.create(
+            title='Existing shared work',
+            creator=self.user,
+            assignee=new_assignee,
         )
         deadline = (timezone.now() + timedelta(days=2)).replace(
             second=0,
@@ -2057,13 +2116,12 @@ class NotificationTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         notifications = task.notifications.all()
-        self.assertEqual(notifications.count(), 1)
-        replacement = notifications.get()
+        self.assertEqual(notifications.count(), 2)
+        replacement = notifications.get(kind=Notification.Kind.DEADLINE_SET)
         self.assertEqual(replacement.kind, Notification.Kind.DEADLINE_SET)
         self.assertEqual(replacement.recipient, new_assignee)
+        self.assertEqual(replacement.status, Notification.Status.PENDING)
+        process_outbound()
+        replacement.refresh_from_db()
         self.assertEqual(replacement.status, Notification.Status.SENT)
-        send_message.assert_called_once()
-        self.assertEqual(
-            send_message.call_args.args[0],
-            new_assignee.telegram_id,
-        )
+        self.assertEqual(send_message.call_count, 2)

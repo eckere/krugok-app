@@ -1,10 +1,20 @@
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from django.conf import settings
 from django.http import HttpRequest
 from django.utils.html import format_html
 
-from .models import InviteCode, Notification, Project, ProjectMembership, Task, TelegramUser
+from .models import (
+    AuditLog,
+    InviteCode,
+    Notification,
+    OutboundMessage,
+    Project,
+    ProjectMembership,
+    RateLimitBucket,
+    Task,
+    TelegramUser,
+)
 
 
 @admin.register(TelegramUser)
@@ -13,9 +23,28 @@ class TelegramUserAdmin(UserAdmin):
     list_filter = ('is_active', 'is_staff', 'is_premium', 'is_verified')
     search_fields = ('username', 'first_name', 'last_name', 'telegram_id')
     fieldsets = UserAdmin.fieldsets + (
-        ('Telegram', {'fields': ('telegram_id', 'photo_url', 'last_seen', 'language_code', 'is_premium', 'is_verified')}),
+        (
+            'Telegram',
+            {
+                'fields': (
+                    'telegram_id',
+                    'telegram_username',
+                    'photo_url',
+                    'last_seen',
+                    'language_code',
+                    'is_premium',
+                    'is_verified',
+                    'timezone',
+                    'notify_deadlines',
+                    'notify_assignments',
+                    'notify_comments',
+                    'notify_messages',
+                    'anonymized_at',
+                )
+            },
+        ),
     )
-    readonly_fields = ('last_seen',)
+    readonly_fields = ('last_seen', 'anonymized_at')
 
 
 @admin.register(InviteCode)
@@ -26,6 +55,8 @@ class InviteCodeAdmin(admin.ModelAdmin):
         'created_by',
         'is_active',
         'expires_at',
+        'project',
+        'project_role',
         'used_by',
         'used_at',
     )
@@ -38,6 +69,8 @@ class InviteCodeAdmin(admin.ModelAdmin):
         'created_by',
         'is_active',
         'expires_at',
+        'project',
+        'project_role',
         'used_by',
         'used_at',
         'created_at',
@@ -122,4 +155,62 @@ class NotificationAdmin(admin.ModelAdmin):
         request: HttpRequest,
         obj: Notification | None = None,
     ) -> bool:
+        return False
+
+
+@admin.register(OutboundMessage)
+class OutboundMessageAdmin(admin.ModelAdmin):
+    list_display = (
+        'kind',
+        'recipient',
+        'status',
+        'attempt_count',
+        'created_at',
+        'sent_at',
+    )
+    list_filter = ('kind', 'status', 'created_at')
+    search_fields = ('recipient__username', 'text', 'dedupe_key')
+    readonly_fields = tuple(
+        field.name for field in OutboundMessage._meta.fields
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at',
+        'actor',
+        'action',
+        'entity_type',
+        'entity_label',
+    )
+    list_filter = ('action', 'entity_type', 'created_at')
+    search_fields = ('actor__username', 'entity_label', 'entity_id')
+    readonly_fields = tuple(field.name for field in AuditLog._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(RateLimitBucket)
+class RateLimitBucketAdmin(admin.ModelAdmin):
+    list_display = ('key_hash', 'request_count', 'window_started_at', 'updated_at')
+    readonly_fields = tuple(field.name for field in RateLimitBucket._meta.fields)
+
+    def has_add_permission(self, request):
         return False

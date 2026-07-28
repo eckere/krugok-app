@@ -6,8 +6,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    extra_hosts:
+      - "api.telegram.org:${TELEGRAM_API_IPV4:-149.154.167.220}"
     volumes:
       - sqlite_data:/app/data
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
     expose:
       - "8000"
     healthcheck:
@@ -20,6 +23,10 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   deadline-worker:
     image: krugok-app:latest
@@ -28,12 +35,57 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    extra_hosts:
+      - "api.telegram.org:${TELEGRAM_API_IPV4:-149.154.167.220}"
     command: ["sh", "/app/docker/deadline-worker.sh"]
     volumes:
       - sqlite_data:/app/data
     depends_on:
       web:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,time; p='/tmp/deadline-worker-heartbeat'; assert os.path.exists(p) and time.time()-os.path.getmtime(p) < max(90,int(os.environ.get('OUTBOUND_POLL_INTERVAL_SECONDS','5'))+60)"
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  backup-worker:
+    image: krugok-app:latest
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    command: ["sh", "/app/docker/backup-worker.sh"]
+    volumes:
+      - sqlite_data:/app/data
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os,time; p='/tmp/backup-worker-heartbeat'; assert os.path.exists(p) and time.time()-os.path.getmtime(p) < int(os.environ.get('BACKUP_INTERVAL_SECONDS','86400'))+600"
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   caddy:
     image: caddy:2-alpine
@@ -51,6 +103,10 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   sqlite_data:

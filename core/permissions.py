@@ -3,7 +3,7 @@ from django.db.models import Q, QuerySet
 from django.shortcuts import get_object_or_404
 
 from .access import is_app_admin
-from .models import Project, Stage, Task, Discussion
+from .models import Discussion, Project, Stage, Task, TelegramUser
 
 
 def get_accessible_projects(user, *, include_archived: bool = False) -> QuerySet[Project]:
@@ -29,6 +29,37 @@ def get_accessible_tasks(user) -> QuerySet[Task]:
         | Q(project__isnull=True, discussions__created_by=user)
         | Q(project__isnull=True, discussions__participants=user)
     ).distinct()
+
+
+def get_collaborators(user) -> QuerySet[TelegramUser]:
+    """Пользователи, с которыми уже существует рабочий контекст."""
+    if is_app_admin(user):
+        return TelegramUser.objects.filter(is_active=True)
+    projects = get_accessible_projects(user, include_archived=True)
+    discussion_ids = Discussion.objects.filter(
+        Q(created_by=user) | Q(participants=user)
+    ).values('pk')
+    return TelegramUser.objects.filter(
+        Q(pk=user.pk)
+        | Q(owned_projects__in=projects)
+        | Q(project_memberships__project__in=projects)
+        | Q(created_tasks__in=get_accessible_tasks(user))
+        | Q(assigned_tasks__in=get_accessible_tasks(user))
+        | Q(created_discussions__in=discussion_ids)
+        | Q(discussions__in=discussion_ids),
+        is_active=True,
+    ).distinct()
+
+
+def can_view_profile(target: TelegramUser, user) -> bool:
+    return bool(
+        user.is_authenticated
+        and (
+            user.pk == target.pk
+            or is_app_admin(user)
+            or get_collaborators(user).filter(pk=target.pk).exists()
+        )
+    )
 
 
 def can_manage_project(project: Project, user) -> bool:

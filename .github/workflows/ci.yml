@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  django:
+    runs-on: ubuntu-24.04
+    env:
+      SECRET_KEY: test-only-secret-key-not-for-production
+      DEBUG: "True"
+      TELEGRAM_BOT_TOKEN: test-token
+      ALLOWED_HOSTS: localhost,testserver
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check config core
+      - run: python -m compileall -q config core
+      - run: python manage.py check
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py test
+
+  production:
+    runs-on: ubuntu-24.04
+    env:
+      APP_DOMAIN: app.example.test
+      SECRET_KEY: ci-only-long-random-looking-secret-key-000000000000000000000000000
+      DEBUG: "False"
+      ALLOWED_HOSTS: app.example.test
+      CSRF_TRUSTED_ORIGINS: https://app.example.test
+      TELEGRAM_BOT_TOKEN: ci-test-token
+      TELEGRAM_SECURE_COOKIES: "True"
+      SECURE_SSL_REDIRECT: "True"
+      SECURE_HSTS_SECONDS: "3600"
+      DATABASE_PATH: /tmp/krugok-ci.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python manage.py check --deploy
+      - run: cp .env.production.example .env.production
+      - run: docker compose --env-file .env.production config --quiet
+      - run: docker build --tag krugok-app:ci .

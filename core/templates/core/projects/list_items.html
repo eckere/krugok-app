@@ -13,7 +13,19 @@
          class="segmented__item {% if filter == 'mine' %}is-active{% endif %}">
         Мои
       </a>
+      <a href="{% url 'project_list' %}?filter=archived"
+         hx-get="{% url 'project_list' %}?filter=archived"
+         hx-target="#project-results" hx-swap="outerHTML"
+         class="segmented__item {% if filter == 'archived' %}is-active{% endif %}">
+        Архив
+      </a>
     </div>
+    <form method="get" action="{% url 'project_list' %}" class="toolbar__search">
+      <input type="hidden" name="filter" value="{{ filter }}">
+      <label class="sr-only" for="project-search">Поиск проектов</label>
+      <input id="project-search" name="q" value="{{ query }}" placeholder="Поиск проектов">
+      <button type="submit" class="btn btn-secondary btn-sm">Найти</button>
+    </form>
   </div>
   <div class="panel__body">
     <div id="project-list" class="entity-list project-cards">
@@ -23,5 +35,12 @@
         <div class="empty-state">Проектов пока нет</div>
       {% endfor %}
     </div>
+    {% if projects.has_other_pages %}
+      <nav class="pagination" aria-label="Страницы проектов">
+        {% if projects.has_previous %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&page={{ projects.previous_page_number }}">Назад</a>{% endif %}
+        <span>{{ projects.number }} / {{ projects.paginator.num_pages }}</span>
+        {% if projects.has_next %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&page={{ projects.next_page_number }}">Далее</a>{% endif %}
+      </nav>
+    {% endif %}
   </div>
 </div>

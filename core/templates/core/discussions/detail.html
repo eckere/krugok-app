@@ -30,8 +30,7 @@
     <div id="message-list" class="chat__messages scroll-area"
          hx-get="{% url 'discussion_messages_poll' discussion.id %}"
          hx-trigger="every 4s"
-         hx-swap="beforeend"
-         hx-vals="js:{after: (document.getElementById('message-list').lastElementChild ? document.getElementById('message-list').lastElementChild.dataset.messageId : 0) || 0}">
+         hx-swap="beforeend">
       {% for message in messages %}
         {% include "core/discussions/message.html" %}
       {% empty %}
@@ -40,10 +39,10 @@
     </div>
 
     <div class="chat__composer">
-      <form hx-post="{% url 'message_create' discussion.id %}"
+      <form id="message-composer"
+            hx-post="{% url 'message_create' discussion.id %}"
             hx-target="#message-list"
-            hx-swap="beforeend"
-            hx-on::after-request="if(event.detail.successful){this.reset();}">
+            hx-swap="beforeend">
         {% csrf_token %}
         {{ form.text }}
         <button type="submit" class="btn btn-primary">Отправить</button>
@@ -54,7 +53,7 @@
     </div>
   </div>
 </div>
-<script>
+<script nonce="{{ request.csp_nonce }}">
   (function () {
     var list = document.getElementById('message-list');
     if (!list) return;

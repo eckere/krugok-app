@@ -7,13 +7,12 @@
 
 from datetime import timedelta
 
-from django.conf import settings
 from django.core.management.base import BaseCommand
-from django.db import models
 from django.utils import timezone
 
 from core.models import Notification, Task
-from core.telegram_notifications import notify
+from core.rate_limit import cleanup_rate_limits
+from core.telegram_notifications import notify, process_outbound
 
 
 class Command(BaseCommand):
@@ -22,21 +21,6 @@ class Command(BaseCommand):
     def handle(self, *args: object, **options: object) -> None:
         now = timezone.now()
         approaching_before = now + timedelta(hours=24)
-        retryable_notifications = (
-            Notification.objects.filter(
-                status=Notification.Status.FAILED,
-                attempt_count__lt=settings.TELEGRAM_NOTIFICATION_MAX_ATTEMPTS,
-                task__status__in=[
-                    Task.Status.NEW,
-                    Task.Status.IN_PROGRESS,
-                ],
-            )
-            .filter(
-                models.Q(next_retry_at__isnull=True)
-                | models.Q(next_retry_at__lte=now)
-            )
-            .select_related('task__assignee', 'task__creator')
-        )
         tasks = (
             Task.objects.filter(deadline__isnull=False)
             .exclude(status=Task.Status.DONE)
@@ -44,21 +28,6 @@ class Command(BaseCommand):
         )
 
         processed = 0
-        sent = 0
-        failed = 0
-
-        for existing in retryable_notifications.iterator():
-            previous_attempt_count = existing.attempt_count
-            notification = notify(existing.task, existing.kind)
-            if (
-                notification is None
-                or notification.attempt_count == previous_attempt_count
-            ):
-                continue
-            if notification.status == Notification.Status.SENT:
-                sent += 1
-            elif notification.status == Notification.Status.FAILED:
-                failed += 1
 
         for task in tasks.iterator():
             processed += 1
@@ -71,19 +40,10 @@ class Command(BaseCommand):
             if kind is None:
                 continue
 
-            previous = task.notifications.filter(kind=kind).first()
-            previous_attempt_count = previous.attempt_count if previous else 0
-            notification = notify(task, kind)
-            if (
-                notification is None
-                or notification.attempt_count == previous_attempt_count
-            ):
-                continue
-            if notification.status == Notification.Status.SENT:
-                sent += 1
-            elif notification.status == Notification.Status.FAILED:
-                failed += 1
+            notify(task, kind)
 
+        sent, failed = process_outbound(limit=200)
+        cleanup_rate_limits()
         self.stdout.write(
             f'Обработано: {processed}; отправлено: {sent}; ошибок: {failed}.'
         )

@@ -101,6 +101,16 @@ a {
   -webkit-tap-highlight-color: transparent;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 38%, transparent);
+  outline-offset: 2px;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -108,6 +118,21 @@ a {
 
 .app-shell {
   min-height: 100vh;
+}
+
+.app-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.app-footer a:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 .app-sidebar {
@@ -608,6 +633,81 @@ a {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.toolbar__search {
+  display: flex;
+  min-width: min(100%, 280px);
+  flex: 1 1 360px;
+  gap: 8px;
+}
+
+.toolbar__search input,
+.toolbar__search select {
+  min-width: 0;
+}
+
+.toolbar__search input {
+  flex: 1 1 220px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.pagination__status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.invite-create,
+.profile-settings {
+  margin-bottom: 16px;
+}
+
+.danger-zone {
+  border: 1px solid color-mix(in srgb, var(--red) 36%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--red-bg) 58%, transparent);
+  padding: 14px;
+}
+
+.danger-zone > summary {
+  cursor: pointer;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.message__actions {
+  position: relative;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.message__actions > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.message__actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.message__actions[open] {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.message__actions form {
+  margin-top: 8px;
 }
 
 .segmented {
@@ -1669,7 +1769,7 @@ a {
   }
 
   .app-nav {
-    min-width: 272px;
+    min-width: 0;
     flex: 1;
     flex-direction: row;
     justify-content: space-around;
@@ -1677,12 +1777,13 @@ a {
   }
 
   .app-nav__link {
-    min-width: 68px;
+    min-width: 0;
     min-height: 54px;
+    flex: 1 1 0;
     flex-direction: column;
     justify-content: center;
     gap: 3px;
-    padding: 6px 8px;
+    padding: 6px 4px;
     font-size: 9px;
   }
 
@@ -1693,8 +1794,8 @@ a {
 
   .app-user {
     display: flex;
-    width: 66px;
-    flex: 0 0 66px;
+    width: 54px;
+    flex: 0 0 54px;
     margin: 0;
     border: 0;
     padding: 0;
@@ -1721,10 +1822,13 @@ a {
   }
 
   .account-switcher__summary .app-user__hint {
+    max-width: 46px;
     margin: 0;
+    overflow: hidden;
     color: inherit;
     font-size: 9px;
     font-weight: 500;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
@@ -1772,6 +1876,7 @@ a {
     margin-right: -14px;
     overflow-x: auto;
     padding-right: 14px;
+    scrollbar-width: thin;
     scroll-snap-type: x mandatory;
   }
 
@@ -1791,6 +1896,25 @@ a {
   .toolbar {
     align-items: flex-start;
     padding: 14px;
+  }
+
+  .toolbar,
+  .toolbar__search {
+    width: 100%;
+  }
+
+  .toolbar__search {
+    flex-direction: column;
+  }
+
+  .toolbar__search .btn,
+  .toolbar__search input,
+  .toolbar__search select {
+    width: 100%;
+  }
+
+  .pagination {
+    flex-wrap: wrap;
   }
 
   .panel__body {

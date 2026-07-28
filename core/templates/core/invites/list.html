@@ -9,16 +9,23 @@
             <h1 class="page-header__title">Приглашения</h1>
             <p class="page-header__subtitle">Ссылка откроет приложение сразу в Telegram. Каждое приглашение одноразовое.</p>
         </div>
-        <div class="page-header__actions">
-            <form method="post" action="{% url 'invite_create' %}">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-primary">+ Пригласить</button>
-            </form>
-        </div>
     </header>
 
     <section class="panel">
         <div class="panel__body">
+            <form method="post" action="{% url 'invite_create' %}" class="form-grid invite-create">
+                {% csrf_token %}
+                {% for field in create_form %}
+                    <div class="form-field">
+                        <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
+                    </div>
+                {% endfor %}
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">+ Создать приглашение</button>
+                </div>
+            </form>
             <div class="entity-list">
                 {% for row in invite_rows %}
                     <article class="entity-card">
@@ -26,11 +33,20 @@
                             <div class="entity-card__title">Код: <code>{{ row.invite.code }}</code></div>
                             <div class="entity-card__meta">
                                 <span>Действует до {{ row.invite.expires_at|date:'d.m.Y, H:i' }}</span>
+                                {% if row.invite.project %}
+                                    <span>{{ row.invite.project.name }} · {{ row.invite.get_project_role_display }}</span>
+                                {% endif %}
                             </div>
                             <div class="form-field">
                                 <label for="invite-link-{{ row.invite.id }}">Ссылка для друга</label>
-                                <input id="invite-link-{{ row.invite.id }}" type="text" value="{{ row.url }}" readonly onclick="this.select()">
+                                <input id="invite-link-{{ row.invite.id }}" type="text" value="{{ row.url }}" readonly data-select-on-click>
                             </div>
+                        </div>
+                        <div class="entity-card__actions">
+                            <form method="post" action="{% url 'invite_revoke' row.invite.id %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-danger btn-sm">Отозвать</button>
+                            </form>
                         </div>
                     </article>
                 {% empty %}

@@ -1,9 +1,12 @@
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from django import forms
 from django.urls import reverse
 
 from .models import (
     Comment,
     Discussion,
+    InviteCode,
     Message,
     Project,
     ProjectMembership,
@@ -11,7 +14,11 @@ from .models import (
     Task,
     TelegramUser,
 )
-from .permissions import get_accessible_projects, get_accessible_tasks
+from .permissions import (
+    get_accessible_projects,
+    get_accessible_tasks,
+    get_collaborators,
+)
 
 
 class DiscussionForm(forms.ModelForm):
@@ -34,8 +41,8 @@ class DiscussionForm(forms.ModelForm):
         self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
         if self.user:
-            self.fields['participants'].queryset = TelegramUser.objects.filter(
-                is_active=True
+            self.fields['participants'].queryset = get_collaborators(
+                self.user
             ).exclude(pk=self.user.pk)
             self.fields['task'].queryset = get_accessible_tasks(self.user)
 
@@ -62,6 +69,7 @@ class InviteCodeRedeemForm(forms.Form):
     code = forms.CharField(
         label='Код приглашения',
         required=False,
+        max_length=64,
         strip=True,
         widget=forms.TextInput(
             attrs={
@@ -140,7 +148,7 @@ class TaskForm(forms.ModelForm):
             project_id = getattr(initial_project, 'pk', initial_project)
 
         stages = Stage.objects.none()
-        assignees = TelegramUser.objects.filter(is_active=True)
+        assignees = get_collaborators(self.user)
         if project_id:
             try:
                 project = projects.get(pk=project_id)
@@ -199,13 +207,17 @@ class ProjectMembershipCreateForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         self.project = kwargs.pop('project')
+        self.actor = kwargs.pop('actor', None)
         super().__init__(*args, **kwargs)
         existing_user_ids = self.project.project_memberships.values_list(
             'user_id', flat=True
         )
-        self.fields['user'].queryset = TelegramUser.objects.filter(
-            is_active=True
-        ).exclude(pk__in=existing_user_ids)
+        users = (
+            get_collaborators(self.actor)
+            if self.actor is not None
+            else TelegramUser.objects.none()
+        )
+        self.fields['user'].queryset = users.exclude(pk__in=existing_user_ids)
         self.fields['role'].choices = [
             (ProjectMembership.Role.ADMIN, ProjectMembership.Role.ADMIN.label),
             (ProjectMembership.Role.MEMBER, ProjectMembership.Role.MEMBER.label),
@@ -263,3 +275,97 @@ class StageForm(forms.ModelForm):
             'order': forms.NumberInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
             'status': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
         }
+
+    def _post_clean(self):
+        # order задаёт желаемую позицию; сервис перестановки применит её
+        # после временного освобождения всех активных позиций.
+        requested_order = self.cleaned_data.get('order')
+        self.cleaned_data['order'] = None
+        super()._post_clean()
+        self.cleaned_data['order'] = requested_order
+        self.instance.order = None
+
+
+class InviteCodeCreateForm(forms.ModelForm):
+    class Meta:
+        model = InviteCode
+        fields = ['project', 'project_role', 'expires_at']
+        labels = {
+            'project': 'Добавить в проект',
+            'project_role': 'Роль в проекте',
+            'expires_at': 'Действует до',
+        }
+        widgets = {
+            'expires_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+        }
+
+    def __init__(self, *args, user=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['project'].queryset = get_accessible_projects(user)
+        self.fields['project'].required = False
+        self.fields['project_role'].required = False
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get('project'):
+            cleaned['project_role'] = ProjectMembership.Role.MEMBER
+        return cleaned
+
+
+class ProfileSettingsForm(forms.ModelForm):
+    class Meta:
+        model = TelegramUser
+        fields = [
+            'timezone',
+            'notify_deadlines',
+            'notify_assignments',
+            'notify_comments',
+            'notify_messages',
+        ]
+        labels = {
+            'timezone': 'Часовой пояс',
+            'notify_deadlines': 'Дедлайны',
+            'notify_assignments': 'Назначения задач',
+            'notify_comments': 'Комментарии',
+            'notify_messages': 'Сообщения',
+        }
+
+    def clean_timezone(self):
+        value = self.cleaned_data['timezone'].strip()
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise forms.ValidationError('Неизвестный часовой пояс.') from exc
+        return value
+
+
+class ProjectOwnershipTransferForm(forms.Form):
+    new_owner = forms.ModelChoiceField(
+        queryset=TelegramUser.objects.none(),
+        label='Новый владелец',
+    )
+    confirmation = forms.CharField(label='Подтверждение')
+
+    def __init__(self, *args, project, **kwargs):
+        self.project = project
+        super().__init__(*args, **kwargs)
+        self.fields['new_owner'].queryset = TelegramUser.objects.filter(
+            project_memberships__project=project,
+            is_active=True,
+        ).exclude(pk=project.owner_id)
+
+    def clean_confirmation(self):
+        value = self.cleaned_data['confirmation'].strip()
+        if value != 'ПЕРЕДАТЬ':
+            raise forms.ValidationError('Введите ПЕРЕДАТЬ заглавными буквами.')
+        return value
+
+
+class AccountDeleteForm(forms.Form):
+    confirmation = forms.CharField(label='Подтверждение')
+
+    def clean_confirmation(self):
+        value = self.cleaned_data['confirmation'].strip()
+        if value != 'УДАЛИТЬ':
+            raise forms.ValidationError('Введите УДАЛИТЬ заглавными буквами.')
+        return value

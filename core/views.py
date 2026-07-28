@@ -5,10 +5,11 @@ import json
 import logging
 
 from django.conf import settings
-from django.contrib.auth import login
+from django.contrib.auth import login, logout
 from django.contrib.auth.decorators import login_required as django_login_required
 from django.core.exceptions import PermissionDenied
-from django.db import connection, models
+from django.core.paginator import Paginator
+from django.db import connection, models, transaction
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -19,31 +20,37 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_http_methods, require_POST
 
 from .access import is_app_admin, redeem_invite_code, user_has_access
+from .audit import record_audit
+from .decorators import app_admin_required, require_verified_user, verified_login_required
 from .forms import (
+    AccountDeleteForm,
     CommentForm,
     DiscussionForm,
+    InviteCodeCreateForm,
     InviteCodeRedeemForm,
     MessageForm,
+    ProfileSettingsForm,
     ProjectForm,
     ProjectMembershipCreateForm,
     ProjectMembershipRoleForm,
+    ProjectOwnershipTransferForm,
     StageForm,
     TaskForm,
 )
 from .models import (
-    Comment,
     Discussion,
     InviteCode,
     Message,
     Notification,
+    OutboundMessage,
     Project,
     ProjectMembership,
     Stage,
     Task,
     TelegramUser,
 )
-from .decorators import app_admin_required, require_verified_user, verified_login_required
 from .permissions import (
+    can_view_profile,
     get_accessible_projects,
     get_accessible_tasks,
     get_discussion_or_403,
@@ -51,14 +58,25 @@ from .permissions import (
     get_stage_or_403,
     get_task_or_403,
 )
+from .rate_limit import allow_request
+from .services import (
+    archive_stage as archive_stage_service,
+)
+from .services import (
+    place_stage,
+)
+from .services import (
+    restore_stage as restore_stage_service,
+)
 from .telegram_auth import (
     InitDataValidationError,
     LoginWidgetValidationError,
     extract_invite_code,
+    extract_invite_code_from_start_param,
     validate_init_data,
     validate_login_widget_data,
 )
-from .telegram_notifications import notify
+from .telegram_notifications import enqueue_outbound, enqueue_task_event, notify
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +93,67 @@ def healthcheck(request):
     return JsonResponse({'status': 'ok'})
 
 
+def readiness(request):
+    with connection.cursor() as cursor:
+        cursor.execute('PRAGMA integrity_check')
+        database_status = cursor.fetchone()[0]
+    status = 200 if database_status == 'ok' else 503
+    return JsonResponse(
+        {'status': 'ready' if status == 200 else 'unavailable'},
+        status=status,
+    )
+
+
+def privacy_policy(request):
+    return render(
+        request,
+        'core/legal/privacy.html',
+        {
+            'operator_name': settings.PRIVACY_OPERATOR_NAME,
+            'contact': settings.PRIVACY_CONTACT,
+        },
+    )
+
+
+def terms_of_use(request):
+    return render(
+        request,
+        'core/legal/terms.html',
+        {'support_contact': settings.SUPPORT_CONTACT},
+    )
+
+
+@app_admin_required
+def operational_status(request):
+    return JsonResponse(
+        {
+            'status': 'ok',
+            'outbound': {
+                'pending': OutboundMessage.objects.filter(
+                    status=OutboundMessage.Status.PENDING
+                ).count(),
+                'failed': OutboundMessage.objects.filter(
+                    status=OutboundMessage.Status.FAILED
+                ).count(),
+                'sending': OutboundMessage.objects.filter(
+                    status=OutboundMessage.Status.SENDING
+                ).count(),
+            },
+            'active_users': TelegramUser.objects.filter(is_active=True).count(),
+            'active_projects': Project.objects.filter(is_archived=False).count(),
+        }
+    )
+
+
 def _close_modal(response, modal_id):
     """Просит клиент закрыть модальное окно после успешной HTMX-операции."""
     response.headers['HX-Trigger'] = json.dumps(
         {'closeModal': {'id': modal_id}}
     )
+    # Формы могут менять счётчики, порядок и empty-state сразу в нескольких
+    # местах страницы. Полная HTMX-перезагрузка после успешного сохранения
+    # оставляет весь экран согласованным с БД.
+    response.headers['HX-Refresh'] = 'true'
     return response
 
 
@@ -123,8 +197,16 @@ def dev_login(request):
         raise Http404
     user, _created = TelegramUser.objects.get_or_create(
         telegram_id=111222333,
-        defaults={'username': 'dev_test', 'first_name': 'Тестировщик', 'last_name': ''},
+        defaults={
+            'username': 'dev_test',
+            'first_name': 'Тестировщик',
+            'last_name': '',
+            'is_verified': True,
+        },
     )
+    if not user.is_verified:
+        user.is_verified = True
+        user.save(update_fields=['is_verified'])
     login(request, user, backend='django.contrib.auth.backends.ModelBackend')
     return redirect('index')
 
@@ -153,6 +235,10 @@ def auth_telegram(request):
     POST /auth/telegram/
     Тело запроса (JSON): {"init_data": "<window.Telegram.WebApp.initData>"}
     """
+    if not allow_request(
+        request, 'telegram-auth', limit=30, window_seconds=5 * 60
+    ):
+        return JsonResponse({'error': 'Слишком много попыток'}, status=429)
     try:
         payload = json.loads(request.body or '{}')
     except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
@@ -188,6 +274,10 @@ def auth_telegram(request):
 @require_POST
 def auth_telegram_widget(request):
     """Принимает подписанный ответ Telegram Login Widget из обычного браузера."""
+    if not allow_request(
+        request, 'telegram-widget-auth', limit=30, window_seconds=5 * 60
+    ):
+        return JsonResponse({'error': 'Слишком много попыток'}, status=429)
     try:
         payload = json.loads(request.body or '{}')
     except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
@@ -207,18 +297,28 @@ def auth_telegram_widget(request):
 def _login_telegram_user(request, tg_user):
     """Обновляет профиль и создаёт Django-сессию после проверки Telegram."""
     telegram_id = tg_user['id']
-    username = tg_user.get('username') or f'tg_{telegram_id}'
+    telegram_username = str(tg_user.get('username') or '')[:64]
+    username = f'tg_{telegram_id}'
 
-    user, _created = TelegramUser.objects.update_or_create(
+    user, created = TelegramUser.objects.update_or_create(
         telegram_id=telegram_id,
         defaults={
             'username': username,
-            'first_name': tg_user.get('first_name', ''),
-            'last_name': tg_user.get('last_name', ''),
-            'photo_url': tg_user.get('photo_url'),
+            'telegram_username': telegram_username,
+            'first_name': str(tg_user.get('first_name') or '')[:150],
+            'last_name': str(tg_user.get('last_name') or '')[:150],
+            'photo_url': str(tg_user.get('photo_url') or '')[:200] or None,
+            'language_code': str(tg_user.get('language_code') or '')[:12],
+            'is_premium': bool(tg_user.get('is_premium', False)),
         },
     )
     login(request, user)
+    record_audit(
+        request,
+        'auth.login',
+        user,
+        changes={'created': created, 'method': 'telegram'},
+    )
     return user
 
 
@@ -230,11 +330,16 @@ def invite_redeem(request):
         return redirect('index')
 
     if request.method == 'POST':
+        if not allow_request(
+            request, 'invite-redeem', limit=10, window_seconds=5 * 60
+        ):
+            return HttpResponse('Слишком много попыток.', status=429)
         form = InviteCodeRedeemForm(request.POST)
         if form.is_valid() and redeem_invite_code(
             request.user, form.cleaned_data['code']
         ):
             request.session.pop('pending_invite_code', None)
+            record_audit(request, 'invite.redeem', request.user)
             return redirect('index')
 
         # Одна и та же формулировка для несуществующего, истёкшего и уже
@@ -252,7 +357,10 @@ def invite_redeem(request):
 
 def invite_link(request, code):
     """Запоминает код из персональной ссылки до Telegram HMAC-входа."""
-    request.session['pending_invite_code'] = code
+    invite_code = extract_invite_code_from_start_param(f'invite_{code}')
+    if invite_code is None:
+        raise Http404
+    request.session['pending_invite_code'] = invite_code
     return redirect('invite_redeem' if request.user.is_authenticated else 'index')
 
 
@@ -278,23 +386,134 @@ def invite_list(request):
         }
         for invite in invites
     ]
-    return render(request, 'core/invites/list.html', {'invite_rows': invite_rows})
+    return render(
+        request,
+        'core/invites/list.html',
+        {
+            'invite_rows': invite_rows,
+            'create_form': InviteCodeCreateForm(user=request.user),
+        },
+    )
 
 
 @app_admin_required
 @require_POST
 def invite_create(request):
-    InviteCode.objects.create(created_by=request.user)
+    form = InviteCodeCreateForm(request.POST, user=request.user)
+    if not form.is_valid():
+        now = timezone.now()
+        invites = InviteCode.objects.filter(
+            created_by=request.user,
+            is_active=True,
+            used_by__isnull=True,
+        ).filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=now))
+        invite_rows = [
+            {
+                'invite': invite,
+                'url': invite.get_telegram_url()
+                or request.build_absolute_uri(invite.get_absolute_url()),
+            }
+            for invite in invites
+        ]
+        return render(
+            request,
+            'core/invites/list.html',
+            {'invite_rows': invite_rows, 'create_form': form},
+            status=422,
+        )
+    invite = form.save(commit=False)
+    invite.created_by = request.user
+    invite.save()
+    record_audit(request, 'invite.create', invite)
+    return redirect('invite_list')
+
+
+@app_admin_required
+@require_POST
+def invite_revoke(request, invite_id):
+    invite = get_object_or_404(InviteCode, pk=invite_id, used_by__isnull=True)
+    invite.is_active = False
+    invite.save(update_fields=['is_active'])
+    record_audit(request, 'invite.revoke', invite)
     return redirect('invite_list')
 
 
 @login_required
 def profile_detail(request, user_id):
     profile_user = get_object_or_404(TelegramUser, pk=user_id, is_active=True)
+    if not can_view_profile(profile_user, request.user):
+        raise PermissionDenied
     return render(
         request,
         'core/users/profile.html',
-        {'profile_user': profile_user},
+        {
+            'profile_user': profile_user,
+            'settings_form': (
+                ProfileSettingsForm(instance=request.user)
+                if profile_user.pk == request.user.pk
+                else None
+            ),
+            'delete_form': (
+                AccountDeleteForm()
+                if profile_user.pk == request.user.pk
+                else None
+            ),
+        },
+    )
+
+
+@login_required
+@require_POST
+def profile_settings(request):
+    form = ProfileSettingsForm(request.POST, instance=request.user)
+    if form.is_valid():
+        form.save()
+        record_audit(request, 'account.settings', request.user)
+        return redirect('profile_detail', user_id=request.user.pk)
+    return render(
+        request,
+        'core/users/profile.html',
+        {
+            'profile_user': request.user,
+            'settings_form': form,
+            'delete_form': AccountDeleteForm(),
+        },
+        status=422,
+    )
+
+
+@login_required
+@require_POST
+def account_logout(request):
+    record_audit(request, 'auth.logout', request.user)
+    logout(request)
+    return redirect('index')
+
+
+@login_required
+@require_POST
+def account_delete(request):
+    form = AccountDeleteForm(request.POST)
+    if request.user.owned_projects.filter(is_archived=False).exists():
+        form.add_error(
+            None,
+            'Перед удалением аккаунта передайте или архивируйте активные проекты.',
+        )
+    if form.is_valid():
+        user = request.user
+        record_audit(request, 'account.anonymize', user)
+        logout(request)
+        user.anonymize()
+        return redirect('index')
+    return render(
+        request,
+        'core/users/profile.html',
+        {
+            'profile_user': request.user,
+            'settings_form': ProfileSettingsForm(instance=request.user),
+            'delete_form': form,
+        },
+        status=422,
     )
 
 
@@ -319,11 +538,31 @@ def task_list(request):
     ).order_by('status', 'deadline')
     if filter_value == 'mine':
         tasks = tasks.filter(assignee=request.user)
+    query = request.GET.get('q', '').strip()
+    status_filter = request.GET.get('status', '').strip()
+    if query:
+        tasks = tasks.filter(
+            models.Q(title__icontains=query)
+            | models.Q(description__icontains=query)
+            | models.Q(project__name__icontains=query)
+        )
+    if status_filter in Task.Status.values:
+        tasks = tasks.filter(status=status_filter)
+    page = Paginator(tasks, 50).get_page(request.GET.get('page'))
 
     template_name = (
         'core/tasks/list_items.html' if request.htmx else 'core/tasks/list.html'
     )
-    return render(request, template_name, {'tasks': tasks, 'filter': filter_value})
+    return render(
+        request,
+        template_name,
+        {
+            'tasks': page,
+            'filter': filter_value,
+            'query': query,
+            'status_filter': status_filter,
+        },
+    )
 
 
 @login_required
@@ -362,8 +601,11 @@ def task_create(request):
             task = form.save(commit=False)
             task.creator = request.user
             task.save()
-            if task.deadline:
+            record_audit(request, 'task.create', task)
+            if task.deadline and task.status != Task.Status.DONE:
                 notify(task, Notification.Kind.DEADLINE_SET)
+            if task.assignee_id and task.assignee_id != request.user.pk:
+                notify(task, Notification.Kind.TASK_ASSIGNED)
             response = render(
                 request,
                 'core/tasks/card.html',
@@ -440,6 +682,7 @@ def task_update(request, task_id):
                         Notification.Kind.DEADLINE_SET,
                         Notification.Kind.DEADLINE_APPROACHING,
                         Notification.Kind.DEADLINE_OVERDUE,
+                        Notification.Kind.TASK_ASSIGNED,
                     ]
                 ).delete()
             elif completed:
@@ -455,6 +698,22 @@ def task_update(request, task_id):
                 and task.status != Task.Status.DONE
             ):
                 notify(task, Notification.Kind.DEADLINE_SET)
+            if (
+                assignee_changed
+                and task.assignee_id
+                and task.assignee_id != request.user.pk
+            ):
+                notify(task, Notification.Kind.TASK_ASSIGNED)
+            record_audit(
+                request,
+                'task.update',
+                task,
+                changes={
+                    'deadline_changed': deadline_changed,
+                    'assignee_changed': assignee_changed,
+                    'status': task.status,
+                },
+            )
             if return_to == 'project':
                 redirect_url = (
                     reverse('project_detail', args=[task.project_id])
@@ -498,8 +757,9 @@ def task_delete(request, task_id):
     в DOM текст "{}" вместо того, чтобы карточка просто исчезла.
     """
     task = get_task_or_403(task_id, request.user, permission='delete')
+    record_audit(request, 'task.delete', task)
     task.delete()
-    return HttpResponse(status=200)
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
 
 
 @login_required
@@ -513,6 +773,12 @@ def task_status(request, task_id):
 
     task.status = new_status
     task.save()
+    record_audit(
+        request,
+        'task.status',
+        task,
+        changes={'status': new_status},
+    )
     if task.status == Task.Status.DONE:
         task.notifications.filter(
             kind__in=[
@@ -520,7 +786,7 @@ def task_status(request, task_id):
                 Notification.Kind.DEADLINE_OVERDUE,
             ]
         ).delete()
-    return render(
+    response = render(
         request,
         'core/tasks/card.html',
         {
@@ -528,6 +794,8 @@ def task_status(request, task_id):
             'task_project_context': request.POST.get('return_to') == 'project',
         },
     )
+    response.headers['HX-Refresh'] = 'true'
+    return response
 
 
 @login_required
@@ -540,6 +808,23 @@ def comment_create(request, task_id):
         comment.task = task
         comment.author = request.user
         comment.save()
+        record_audit(request, 'comment.create', comment)
+        recipients = {
+            user.pk: user
+            for user in [task.creator, task.assignee]
+            if user is not None and user.pk != request.user.pk
+        }
+        for recipient in recipients.values():
+            enqueue_task_event(
+                task,
+                recipient=recipient,
+                kind=Notification.Kind.COMMENT_ADDED,
+                event_id=str(comment.pk),
+                text=(
+                    f'{request.user.display_name} добавил комментарий '
+                    f'к задаче «{task.title}».'
+                ),
+            )
         return redirect('task_detail', task_id=task.id)
 
     return render(request, 'core/tasks/detail.html', {
@@ -558,7 +843,13 @@ def comment_create(request, task_id):
 def project_list(request):
     """GET /projects/ — список активных (не архивных) проектов."""
     filter_value = request.GET.get('filter', 'all')
-    projects = get_accessible_projects(request.user).order_by('-created_at')
+    include_archived = filter_value == 'archived'
+    projects = get_accessible_projects(
+        request.user,
+        include_archived=include_archived,
+    ).order_by('-created_at')
+    if include_archived:
+        projects = projects.filter(is_archived=True)
     if filter_value == 'mine':
         projects = projects.filter(
             models.Q(owner=request.user)
@@ -567,13 +858,20 @@ def project_list(request):
                 project_memberships__role=ProjectMembership.Role.OWNER,
             )
         ).distinct()
+    query = request.GET.get('q', '').strip()
+    if query:
+        projects = projects.filter(
+            models.Q(name__icontains=query)
+            | models.Q(description__icontains=query)
+        )
+    page = Paginator(projects, 50).get_page(request.GET.get('page'))
     template_name = (
         'core/projects/list_items.html' if request.htmx else 'core/projects/list.html'
     )
     return render(
         request,
         template_name,
-        {'projects': projects, 'filter': filter_value},
+        {'projects': page, 'filter': filter_value, 'query': query},
     )
 
 
@@ -592,6 +890,9 @@ def project_detail(request, project_id):
     memberships = project.project_memberships.select_related('user').order_by(
         'role', 'user__first_name', 'user__username'
     )
+    archived_stages = project.stages.filter(is_archived=True).order_by(
+        '-updated_at'
+    )
     return render(
         request,
         'core/projects/detail.html',
@@ -600,6 +901,12 @@ def project_detail(request, project_id):
             'stages': stages,
             'unassigned_tasks': unassigned_tasks,
             'memberships': memberships,
+            'archived_stages': archived_stages,
+            'ownership_form': (
+                ProjectOwnershipTransferForm(project=project)
+                if project.is_owner(request.user)
+                else None
+            ),
         },
     )
 
@@ -623,6 +930,7 @@ def project_create(request):
                 user=request.user,
                 role=ProjectMembership.Role.OWNER,
             )
+            record_audit(request, 'project.create', project)
             response = render(request, 'core/projects/card.html', {'project': project})
             return _close_modal(response, 'project-modal')
         response = render(
@@ -647,6 +955,7 @@ def project_update(request, project_id):
         form = ProjectForm(request.POST, instance=project)
         if form.is_valid():
             form.save()
+            record_audit(request, 'project.update', project)
             if return_to == 'detail':
                 return HttpResponse(
                     headers={'HX-Redirect': reverse('project_detail', args=[project.id])}
@@ -674,9 +983,17 @@ def project_update(request, project_id):
 @login_required
 @require_http_methods(['DELETE'])
 def project_delete(request, project_id):
-    project = get_project_or_403(project_id, request.user, required_role='owner')
+    project = get_object_or_404(Project, pk=project_id)
+    if not (request.user.is_superuser or project.is_owner(request.user)):
+        raise PermissionDenied
+    if not project.is_archived:
+        return HttpResponse(
+            'Сначала архивируйте проект.',
+            status=409,
+        )
+    record_audit(request, 'project.delete', project)
     project.delete()
-    return HttpResponse(status=200)
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
 
 
 @login_required
@@ -692,9 +1009,55 @@ def project_archive(request, project_id):
     project = get_project_or_403(project_id, request.user, required_role='admin')
     project.is_archived = True
     project.save()
+    record_audit(request, 'project.archive', project)
     if request.POST.get('return_to') == 'projects':
         return HttpResponse(headers={'HX-Redirect': reverse('project_list')})
-    return HttpResponse(status=200)
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+
+
+@login_required
+@require_POST
+def project_restore(request, project_id):
+    project = get_object_or_404(Project, pk=project_id, is_archived=True)
+    if not (request.user.is_superuser or project.is_admin(request.user)):
+        raise PermissionDenied
+    project.is_archived = False
+    project.save(update_fields=['is_archived', 'updated_at'])
+    record_audit(request, 'project.restore', project)
+    return redirect('project_detail', project_id=project.pk)
+
+
+@login_required
+@require_POST
+def project_transfer_ownership(request, project_id):
+    project = get_project_or_403(
+        project_id,
+        request.user,
+        required_role='owner',
+    )
+    form = ProjectOwnershipTransferForm(request.POST, project=project)
+    if not form.is_valid():
+        raise PermissionDenied('Передача владения не подтверждена.')
+    new_owner = form.cleaned_data['new_owner']
+    old_owner_id = project.owner_id
+    with transaction.atomic():
+        ProjectMembership.objects.filter(
+            project=project,
+            user_id=old_owner_id,
+        ).update(role=ProjectMembership.Role.ADMIN)
+        Project.objects.filter(pk=project.pk).update(owner=new_owner)
+        ProjectMembership.objects.filter(
+            project=project,
+            user=new_owner,
+        ).update(role=ProjectMembership.Role.OWNER)
+    project.owner = new_owner
+    record_audit(
+        request,
+        'project.transfer_ownership',
+        project,
+        changes={'from_user_id': old_owner_id, 'to_user_id': new_owner.pk},
+    )
+    return redirect('project_detail', project_id=project.pk)
 
 
 @login_required
@@ -702,11 +1065,16 @@ def project_archive(request, project_id):
 def project_member_create(request, project_id):
     project = get_project_or_403(project_id, request.user, required_role='owner')
     if request.method == 'POST':
-        form = ProjectMembershipCreateForm(request.POST, project=project)
+        form = ProjectMembershipCreateForm(
+            request.POST,
+            project=project,
+            actor=request.user,
+        )
         if form.is_valid():
             membership = form.save(commit=False)
             membership.project = project
             membership.save()
+            record_audit(request, 'membership.create', membership)
             response = render(
                 request,
                 'core/projects/members/card.html',
@@ -727,7 +1095,13 @@ def project_member_create(request, project_id):
     return render(
         request,
         'core/projects/members/form.html',
-        {'project': project, 'form': ProjectMembershipCreateForm(project=project)},
+        {
+            'project': project,
+            'form': ProjectMembershipCreateForm(
+                project=project,
+                actor=request.user,
+            ),
+        },
     )
 
 
@@ -750,6 +1124,7 @@ def project_member_update(request, membership_id):
         form = ProjectMembershipRoleForm(request.POST, instance=membership)
         if form.is_valid():
             membership = form.save()
+            record_audit(request, 'membership.update', membership)
             response = render(
                 request,
                 'core/projects/members/card.html',
@@ -794,16 +1169,9 @@ def project_member_delete(request, membership_id):
         )
     if membership.user_id == project.owner_id:
         raise PermissionDenied
+    record_audit(request, 'membership.delete', membership)
     membership.delete()
-    return HttpResponse(status=200)
-
-
-def _normalize_stage_order(project):
-    stages = list(project.stages.filter(is_archived=False).order_by('order', 'created_at'))
-    for index, stage in enumerate(stages, start=1):
-        if stage.order != index:
-            stage.order = index
-            stage.save(update_fields=['order'])
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
 
 
 @login_required
@@ -812,15 +1180,13 @@ def stage_create(request, project_id):
     if request.method == 'POST':
         form = StageForm(request.POST)
         if form.is_valid():
+            requested_order = form.cleaned_data.get('order')
             stage = form.save(commit=False)
             stage.project = project
-            if stage.order is None:
-                max_order = project.stages.filter(is_archived=False).aggregate(models.Max('order'))['order__max']
-                stage.order = (max_order or 0) + 1
-            else:
-                project.stages.filter(is_archived=False, order__gte=stage.order).update(order=models.F('order') + 1)
+            stage.order = None
             stage.save()
-            _normalize_stage_order(project)
+            place_stage(stage, requested_order)
+            record_audit(request, 'stage.create', stage)
             response = render(
                 request,
                 'core/stages/card.html',
@@ -853,19 +1219,11 @@ def stage_update(request, stage_id):
             new_order = form.cleaned_data.get('order')
             if new_order is None:
                 new_order = old_order
-            if new_order is None:
-                max_order = project.stages.filter(is_archived=False).aggregate(models.Max('order'))['order__max'] or 0
-                new_order = max_order + 1
-            if old_order != new_order:
-                stage.order = None
-                stage.save(update_fields=['order'])
-                if old_order is not None and old_order < new_order:
-                    project.stages.filter(is_archived=False, order__gt=old_order, order__lte=new_order).exclude(pk=stage.pk).update(order=models.F('order') - 1)
-                else:
-                    project.stages.filter(is_archived=False, order__gte=new_order, order__lt=old_order if old_order is not None else new_order).exclude(pk=stage.pk).update(order=models.F('order') + 1)
-                stage.order = new_order
+            stage = form.save(commit=False)
+            stage.order = None
             stage.save()
-            _normalize_stage_order(project)
+            place_stage(stage, new_order)
+            record_audit(request, 'stage.update', stage)
             response = render(
                 request,
                 'core/stages/card.html',
@@ -890,20 +1248,39 @@ def stage_update(request, stage_id):
 @require_POST
 def stage_archive(request, stage_id):
     stage = get_stage_or_403(stage_id, request.user, required_role='admin')
-    stage.is_archived = True
-    stage.save()
-    _normalize_stage_order(stage.project)
-    return HttpResponse(status=200)
+    record_audit(request, 'stage.archive', stage)
+    archive_stage_service(stage)
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
+
+
+@login_required
+@require_POST
+def stage_restore(request, stage_id):
+    stage = get_object_or_404(
+        Stage.objects.select_related('project'),
+        pk=stage_id,
+        is_archived=True,
+    )
+    if not (request.user.is_superuser or stage.project.is_admin(request.user)):
+        raise PermissionDenied
+    restore_stage_service(stage)
+    record_audit(request, 'stage.restore', stage)
+    return redirect('project_detail', project_id=stage.project_id)
 
 
 @login_required
 @require_http_methods(['DELETE'])
 def stage_delete(request, stage_id):
-    stage = get_stage_or_403(stage_id, request.user, required_role='admin')
-    project = stage.project
+    stage = get_object_or_404(
+        Stage.objects.select_related('project'),
+        pk=stage_id,
+        is_archived=True,
+    )
+    if not (request.user.is_superuser or stage.project.is_owner(request.user)):
+        raise PermissionDenied
+    record_audit(request, 'stage.delete', stage)
     stage.delete()
-    _normalize_stage_order(project)
-    return HttpResponse(status=200)
+    return HttpResponse(status=200, headers={'HX-Refresh': 'true'})
 
 
 # ---------------------------------------------------------------------------
@@ -935,6 +1312,7 @@ def discussion_create(request):
             form.save_m2m()
             # Add the creator to the participants
             discussion.participants.add(request.user)
+            record_audit(request, 'discussion.create', discussion)
             return redirect('discussion_detail', discussion_id=discussion.id)
         return render(request, 'core/discussions/form.html', {'form': form}, status=422)
 
@@ -958,6 +1336,7 @@ def discussion_detail(request, discussion_id):
 @require_http_methods(['DELETE'])
 def discussion_delete(request, discussion_id):
     discussion = get_object_or_404(Discussion, pk=discussion_id)
+    record_audit(request, 'discussion.delete', discussion)
     discussion.delete()
     if request.GET.get('redirect') == '1':
         return HttpResponse(
@@ -986,6 +1365,10 @@ def message_create(request, discussion_id):
     в #message-list ничего не добавляет.
     """
     discussion = get_discussion_or_403(discussion_id, request.user)
+    if not allow_request(
+        request, 'message-create', limit=60, window_seconds=60
+    ):
+        return HttpResponse('Слишком много сообщений.', status=429)
     form = MessageForm(request.POST)
 
     if form.is_valid():
@@ -993,6 +1376,19 @@ def message_create(request, discussion_id):
         message.discussion = discussion
         message.sender = request.user
         message.save()
+        record_audit(request, 'message.create', message)
+        for recipient in discussion.participants.exclude(
+            pk=request.user.pk
+        ).filter(is_active=True):
+            enqueue_outbound(
+                recipient=recipient,
+                kind=Notification.Kind.MESSAGE_ADDED,
+                text=(
+                    f'{request.user.display_name}: новое сообщение '
+                    f'в обсуждении «{discussion.title}».'
+                ),
+                dedupe_key=f'message:{message.pk}:{recipient.pk}',
+            )
         html = render_to_string(
             'core/discussions/message.html', {'message': message}, request=request
         )
@@ -1015,6 +1411,45 @@ def message_create(request, discussion_id):
 
 
 @login_required
+@require_POST
+def message_update(request, message_id):
+    message = get_object_or_404(
+        Message.objects.select_related('discussion', 'sender'),
+        pk=message_id,
+    )
+    get_discussion_or_403(message.discussion_id, request.user)
+    if message.sender_id != request.user.pk:
+        raise PermissionDenied
+    form = MessageForm(request.POST, instance=message)
+    if not form.is_valid():
+        return HttpResponse('Сообщение не может быть пустым.', status=422)
+    message = form.save(commit=False)
+    message.edited_at = timezone.now()
+    message.save()
+    record_audit(request, 'message.update', message)
+    return render(
+        request,
+        'core/discussions/message.html',
+        {'message': message},
+    )
+
+
+@login_required
+@require_http_methods(['DELETE'])
+def message_delete(request, message_id):
+    message = get_object_or_404(
+        Message.objects.select_related('discussion', 'sender'),
+        pk=message_id,
+    )
+    get_discussion_or_403(message.discussion_id, request.user)
+    if message.sender_id != request.user.pk and not is_app_admin(request.user):
+        raise PermissionDenied
+    record_audit(request, 'message.delete', message)
+    message.delete()
+    return HttpResponse(status=200)
+
+
+@login_required
 def discussion_messages_poll(request, discussion_id):
     """
     GET /discussions/<id>/messages/poll/?after=<id последнего сообщения в DOM>
@@ -1022,6 +1457,10 @@ def discussion_messages_poll(request, discussion_id):
     сбрасывать позицию прокрутки чата.
     """
     discussion = get_discussion_or_403(discussion_id, request.user)
+    if not allow_request(
+        request, 'message-poll', limit=120, window_seconds=10 * 60
+    ):
+        return HttpResponse(status=429)
 
     try:
         after_id = int(request.GET.get('after') or 0)

@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 
-from .models import InviteCode, TelegramUser
+from .models import InviteCode, ProjectMembership, TelegramUser
 
 
 def is_telegram_id_allowed(telegram_id: int | None) -> bool:
@@ -60,5 +60,11 @@ def redeem_invite_code(user, code) -> bool:
             used_at=now,
             is_active=False,
         )
+        if invite.project_id:
+            ProjectMembership.objects.update_or_create(
+                project_id=invite.project_id,
+                user=user,
+                defaults={'role': invite.project_role},
+            )
         user.is_verified = True
         return True

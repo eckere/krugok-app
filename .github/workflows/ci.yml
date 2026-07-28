@@ -49,5 +49,6 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: python manage.py check --deploy
-      - run: docker compose --env-file .env.production.example config --quiet
+      - run: cp .env.production.example .env.production
+      - run: docker compose --env-file .env.production config --quiet
       - run: docker build --tag krugok-app:ci .

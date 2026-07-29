@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" data-theme="{% if user.is_authenticated %}{{ user.theme_preference }}{% else %}telegram{% endif %}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -263,12 +263,26 @@
                 var isDark = webApp.colorScheme === 'dark' || (
                     !webApp.colorScheme && backgroundLuminance !== null && backgroundLuminance < 0.18
                 );
-                root.classList.toggle('tg-theme-dark', isDark);
-                root.style.colorScheme = isDark ? 'dark' : 'light';
+                var themePreference = root.dataset.theme || 'telegram';
+                var followsTelegram = themePreference === 'telegram';
+                var appliedDark = themePreference === 'dark' || (followsTelegram && isDark);
+                root.classList.toggle('tg-theme-dark', followsTelegram && isDark);
+                root.style.colorScheme = appliedDark ? 'dark' : 'light';
 
                 var primaryLuminance = luminance(toRgb(themeParams.button_color));
-                if (primaryLuminance !== null) {
+                if (followsTelegram && primaryLuminance !== null) {
                     root.style.setProperty('--primary-fg', primaryLuminance > 0.18 ? '#0f172a' : '#ffffff');
+                }
+
+                if (!followsTelegram) {
+                    root.style.removeProperty('--primary-fg');
+                    var forcedBackground = appliedDark ? '#17212b' : '#f5f6f7';
+                    if (typeof webApp.setHeaderColor === 'function') {
+                        webApp.setHeaderColor(forcedBackground);
+                    }
+                    if (typeof webApp.setBackgroundColor === 'function') {
+                        webApp.setBackgroundColor(forcedBackground);
+                    }
                 }
             }
 

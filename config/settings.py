@@ -322,6 +322,8 @@ LOGGING = {
     },
 }
 
+APP_RELEASE_SHA = os.environ.get('APP_RELEASE_SHA', '').strip() or 'unknown'
+
 
 def _validate_production_settings():
     if DEBUG:

@@ -323,15 +323,47 @@
     });
   }
 
+  function enhanceSearchFields(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('.search-field').forEach(function (field) {
+      if (field.dataset.searchEnhanced === 'true') return;
+      var input = field.querySelector('input[type="search"]');
+      var clearButton = field.querySelector('[data-search-clear]');
+      if (!input || !clearButton) return;
+      field.dataset.searchEnhanced = 'true';
+
+      var syncClearButton = function () {
+        clearButton.hidden = !input.value;
+      };
+      input.addEventListener('input', syncClearButton);
+      clearButton.addEventListener('click', function () {
+        input.value = '';
+        syncClearButton();
+        input.focus();
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+      });
+      syncClearButton();
+    });
+  }
+
   function enhance(root) {
     enhanceSelects(root);
     enhanceTextareas(root);
+    enhanceSearchFields(root);
+  }
+
+  function closeActionMenus(except) {
+    document.querySelectorAll('.entity-actions-menu[open]').forEach(function (menu) {
+      if (menu !== except) menu.removeAttribute('open');
+    });
   }
 
   document.addEventListener('click', function (event) {
     if (openSelect && !openSelect.wrapper.contains(event.target) && !openSelect.menu.contains(event.target)) {
       closeSelect(openSelect, false);
     }
+    var actionMenu = event.target.closest('.entity-actions-menu');
+    closeActionMenus(actionMenu);
   });
 
   document.addEventListener('keydown', function (event) {
@@ -339,6 +371,7 @@
       event.preventDefault();
       closeSelect(openSelect, true);
     }
+    if (event.key === 'Escape') closeActionMenus();
   });
 
   window.addEventListener('resize', function () {
@@ -350,6 +383,7 @@
 
   document.body.addEventListener('htmx:beforeRequest', function () {
     closeSelect(openSelect, false);
+    closeActionMenus();
   });
   document.body.addEventListener('htmx:afterRequest', function (event) {
     if (event.detail.elt && event.detail.elt.matches('#message-composer')) {

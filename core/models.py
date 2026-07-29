@@ -26,6 +26,11 @@ INVITE_START_PARAM_PREFIX = 'invite_'
 
 
 class TelegramUser(AbstractUser):
+    class ThemePreference(models.TextChoices):
+        TELEGRAM = 'telegram', 'Как в Telegram'
+        LIGHT = 'light', 'Светлая'
+        DARK = 'dark', 'Тёмная'
+
     telegram_id = models.BigIntegerField(unique=True, null=True, blank=True, db_index=True)
     telegram_username = models.CharField(max_length=64, blank=True, db_index=True)
     photo_url = models.URLField(blank=True, null=True)
@@ -38,6 +43,11 @@ class TelegramUser(AbstractUser):
     notify_assignments = models.BooleanField(default=True)
     notify_comments = models.BooleanField(default=True)
     notify_messages = models.BooleanField(default=True)
+    theme_preference = models.CharField(
+        max_length=12,
+        choices=ThemePreference.choices,
+        default=ThemePreference.TELEGRAM,
+    )
     anonymized_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
@@ -399,6 +409,7 @@ class OutboundMessage(models.Model):
         SENDING = 'sending', 'Отправляется'
         SENT = 'sent', 'Отправлено'
         FAILED = 'failed', 'Ошибка'
+        CANCELLED = 'cancelled', 'Закрыто вручную'
 
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,

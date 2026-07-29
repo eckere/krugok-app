@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}Очередь уведомлений — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <div class="page-header__eyebrow">Система</div>
+      <h1 class="page-header__title">Очередь Telegram-уведомлений</h1>
+      <p class="page-header__subtitle">Релиз: <code>{{ release_sha }}</code></p>
+    </div>
+    <div class="page-header__actions">
+      <a href="{% url 'operational_status' %}" class="btn btn-secondary">JSON-статус</a>
+      <a href="{% url 'profile_settings' %}" class="btn btn-secondary">В профиль</a>
+    </div>
+  </header>
+
+  <section class="stats-grid ops-stats" aria-label="Состояние очереди">
+    <article class="stat-card">
+      <div class="stat-card__label">Ожидают</div>
+      <div class="stat-card__value">{{ pending_count }}</div>
+    </article>
+    <article class="stat-card">
+      <div class="stat-card__label">С ошибкой</div>
+      <div class="stat-card__value">{{ failed_count }}</div>
+    </article>
+    <article class="stat-card">
+      <div class="stat-card__label">Закрыты вручную</div>
+      <div class="stat-card__value">{{ cancelled_count }}</div>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel__header">
+      <div>
+        <h2 class="panel__title">Исчерпали попытки</h2>
+        <div class="panel__subtitle">Можно повторить с нуля или закрыть, если доставка больше не нужна.</div>
+      </div>
+    </div>
+    <div class="panel__body">
+      <div class="ops-queue">
+        {% for outbound in exhausted_messages %}
+          <article class="ops-message">
+            <div class="ops-message__content">
+              <div class="ops-message__title">{{ outbound.kind }} → {{ outbound.recipient.display_name }}</div>
+              <div class="ops-message__meta">
+                <span>Попыток: {{ outbound.attempt_count }} / {{ max_attempts }}</span>
+                {% if outbound.last_attempt_at %}<span>{{ outbound.last_attempt_at|date:'d.m.Y, H:i' }}</span>{% endif %}
+              </div>
+              <div class="ops-message__error">{{ outbound.error_message|default:'Причина ошибки не сохранена.' }}</div>
+            </div>
+            <div class="ops-message__actions">
+              <form method="post" action="{% url 'outbound_retry' outbound.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-primary btn-sm">Повторить</button>
+              </form>
+              <form method="post" action="{% url 'outbound_cancel' outbound.id %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-secondary btn-sm">Закрыть</button>
+              </form>
+            </div>
+          </article>
+        {% empty %}
+          <div class="empty-state">Уведомлений с исчерпанными попытками нет</div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel__header">
+      <div>
+        <h2 class="panel__title">Ожидают автоматического повтора</h2>
+        <div class="panel__subtitle">Последние сообщения, для которых worker ещё продолжает попытки.</div>
+      </div>
+    </div>
+    <div class="panel__body">
+      <div class="ops-queue">
+        {% for outbound in retryable_messages %}
+          <article class="ops-message">
+            <div class="ops-message__content">
+              <div class="ops-message__title">{{ outbound.kind }} → {{ outbound.recipient.display_name }}</div>
+              <div class="ops-message__meta">
+                <span>Попыток: {{ outbound.attempt_count }} / {{ max_attempts }}</span>
+                {% if outbound.next_retry_at %}<span>Следующая: {{ outbound.next_retry_at|date:'d.m.Y, H:i' }}</span>{% endif %}
+              </div>
+              <div class="ops-message__error">{{ outbound.error_message }}</div>
+            </div>
+          </article>
+        {% empty %}
+          <div class="empty-state">Автоматических повторов сейчас нет</div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -13,6 +13,9 @@
       {% endif %}
     </div>
     <div class="page-header__actions">
+      {% if is_app_admin %}
+        <a href="{% url 'outbound_queue' %}" class="btn btn-secondary">Состояние системы</a>
+      {% endif %}
       <a href="{% url 'index' %}" class="btn btn-secondary">На главную</a>
     </div>
   </header>
@@ -38,20 +41,56 @@
       <div class="panel__header">
         <div>
           <h2 class="panel__title">Настройки</h2>
-          <div class="panel__subtitle">Часовой пояс и уведомления</div>
+          <div class="panel__subtitle">Оформление, часовой пояс и уведомления</div>
         </div>
       </div>
       <div class="panel__body">
         <form method="post" action="{% url 'profile_settings' %}">
           {% csrf_token %}
-          <div class="form-grid">
-            {% for field in settings_form %}
-              <div class="form-field {% if field.name == 'timezone' %}form-field--full{% endif %}">
-                <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
-                {{ field }}
-                {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
+          <div class="settings-sections">
+            <fieldset class="settings-section">
+              <legend class="settings-section__title">Оформление</legend>
+              <p class="settings-section__hint">Выберите тему приложения на всех ваших устройствах.</p>
+              <div class="theme-picker">
+                {% for choice in settings_form.theme_preference %}
+                  <label class="theme-option" for="{{ choice.id_for_label }}">
+                    {{ choice.tag }}
+                    <span class="theme-option__preview theme-option__preview--{{ choice.data.value }}" aria-hidden="true">
+                      <span></span><span></span><span></span>
+                    </span>
+                    <span class="theme-option__label">{{ choice.choice_label }}</span>
+                  </label>
+                {% endfor %}
               </div>
-            {% endfor %}
+              {% if settings_form.theme_preference.errors %}
+                <div class="form-error">{{ settings_form.theme_preference.errors|join:', ' }}</div>
+              {% endif %}
+            </fieldset>
+
+            <section class="settings-section" aria-labelledby="regional-settings-title">
+              <h3 id="regional-settings-title" class="settings-section__title">Региональные настройки</h3>
+              <div class="form-field">
+                <label for="{{ settings_form.timezone.id_for_label }}" class="form-label">{{ settings_form.timezone.label }}</label>
+                {{ settings_form.timezone }}
+                {% if settings_form.timezone.errors %}<div class="form-error">{{ settings_form.timezone.errors|join:', ' }}</div>{% endif %}
+              </div>
+            </section>
+
+            <fieldset class="settings-section">
+              <legend class="settings-section__title">Telegram-уведомления</legend>
+              <p class="settings-section__hint">Отключите события, о которых не нужно писать в Telegram.</p>
+              <div class="notification-options">
+                {% for field in settings_form %}
+                  {% if field.name|slice:":7" == "notify_" %}
+                    <label class="notification-option" for="{{ field.id_for_label }}">
+                      {{ field }}
+                      <span>{{ field.label }}</span>
+                    </label>
+                    {% if field.errors %}<div class="form-error">{{ field.errors|join:', ' }}</div>{% endif %}
+                  {% endif %}
+                {% endfor %}
+              </div>
+            </fieldset>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Сохранить</button>

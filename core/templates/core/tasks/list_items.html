@@ -1,23 +1,38 @@
 <div id="task-results">
   <div class="toolbar">
     <div class="segmented" aria-label="Фильтр задач">
-      <a href="{% url 'task_list' %}?filter=all"
-         hx-get="{% url 'task_list' %}?filter=all"
+      <a href="{% url 'task_list' %}?filter=all&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}"
+         hx-get="{% url 'task_list' %}?filter=all&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}"
          hx-target="#task-results" hx-swap="outerHTML"
+         hx-replace-url="true"
          class="segmented__item {% if filter == 'all' %}is-active{% endif %}">
         Все
       </a>
-      <a href="{% url 'task_list' %}?filter=mine"
-         hx-get="{% url 'task_list' %}?filter=mine"
+      <a href="{% url 'task_list' %}?filter=mine&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}"
+         hx-get="{% url 'task_list' %}?filter=mine&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}"
          hx-target="#task-results" hx-swap="outerHTML"
+         hx-replace-url="true"
          class="segmented__item {% if filter == 'mine' %}is-active{% endif %}">
         Мои
       </a>
     </div>
-    <form method="get" action="{% url 'task_list' %}" class="toolbar__search">
+    <form method="get" action="{% url 'task_list' %}"
+          class="toolbar__search toolbar__search--tasks"
+          hx-get="{% url 'task_list' %}"
+          hx-target="#task-results"
+          hx-swap="outerHTML"
+          hx-replace-url="true"
+          hx-trigger="submit, input changed delay:350ms from:#task-search, change from:#task-status-filter">
       <input type="hidden" name="filter" value="{{ filter }}">
+      <input type="hidden" name="quick" value="{{ quick_filter }}">
       <label class="sr-only" for="task-search">Поиск задач</label>
-      <input id="task-search" name="q" value="{{ query }}" placeholder="Поиск задач">
+      <div class="search-field">
+        <svg class="search-field__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path>
+        </svg>
+        <input id="task-search" name="q" value="{{ query }}" placeholder="Поиск задач" type="search" autocomplete="off">
+        <button type="button" class="search-field__clear" data-search-clear aria-label="Очистить поиск" {% if not query %}hidden{% endif %}>×</button>
+      </div>
       <label class="sr-only" for="task-status-filter">Статус</label>
       <select id="task-status-filter" name="status" data-custom-select="true">
         <option value="">Все статусы</option>
@@ -25,10 +40,37 @@
         <option value="in_progress" {% if status_filter == 'in_progress' %}selected{% endif %}>В процессе</option>
         <option value="done" {% if status_filter == 'done' %}selected{% endif %}>Выполнена</option>
       </select>
-      <button type="submit" class="btn btn-secondary btn-sm">Найти</button>
+      <button type="submit" class="btn btn-secondary search-submit" aria-label="Найти">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path>
+        </svg>
+      </button>
     </form>
   </div>
+  <nav class="quick-filters scroll-area" aria-label="Быстрые фильтры задач">
+    <a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}"
+       hx-get="{% url 'task_list' %}?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}"
+       hx-target="#task-results" hx-swap="outerHTML" hx-replace-url="true"
+       class="filter-chip {% if not quick_filter %}is-active{% endif %}">Все сроки</a>
+    <a href="?filter={{ filter }}&q={{ query|urlencode }}&quick=overdue"
+       hx-get="{% url 'task_list' %}?filter={{ filter }}&q={{ query|urlencode }}&quick=overdue"
+       hx-target="#task-results" hx-swap="outerHTML" hx-replace-url="true"
+       class="filter-chip {% if quick_filter == 'overdue' %}is-active{% endif %}">Просрочено</a>
+    <a href="?filter={{ filter }}&q={{ query|urlencode }}&quick=today"
+       hx-get="{% url 'task_list' %}?filter={{ filter }}&q={{ query|urlencode }}&quick=today"
+       hx-target="#task-results" hx-swap="outerHTML" hx-replace-url="true"
+       class="filter-chip {% if quick_filter == 'today' %}is-active{% endif %}">Сегодня</a>
+    <a href="?filter={{ filter }}&q={{ query|urlencode }}&quick=no_deadline"
+       hx-get="{% url 'task_list' %}?filter={{ filter }}&q={{ query|urlencode }}&quick=no_deadline"
+       hx-target="#task-results" hx-swap="outerHTML" hx-replace-url="true"
+       class="filter-chip {% if quick_filter == 'no_deadline' %}is-active{% endif %}">Без срока</a>
+    <a href="?filter={{ filter }}&q={{ query|urlencode }}&quick=done"
+       hx-get="{% url 'task_list' %}?filter={{ filter }}&q={{ query|urlencode }}&quick=done"
+       hx-target="#task-results" hx-swap="outerHTML" hx-replace-url="true"
+       class="filter-chip {% if quick_filter == 'done' %}is-active{% endif %}">Выполнено</a>
+  </nav>
   <div class="panel__body">
+    <div class="results-summary" aria-live="polite">Найдено задач: {{ tasks.paginator.count }}</div>
     <div id="task-list" class="entity-list">
       {% for task in tasks %}
         {% include 'core/tasks/card.html' %}
@@ -38,9 +80,9 @@
     </div>
     {% if tasks.has_other_pages %}
       <nav class="pagination" aria-label="Страницы задач">
-        {% if tasks.has_previous %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&page={{ tasks.previous_page_number }}">Назад</a>{% endif %}
+        {% if tasks.has_previous %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}&page={{ tasks.previous_page_number }}">Назад</a>{% endif %}
         <span>{{ tasks.number }} / {{ tasks.paginator.num_pages }}</span>
-        {% if tasks.has_next %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&page={{ tasks.next_page_number }}">Далее</a>{% endif %}
+        {% if tasks.has_next %}<a href="?filter={{ filter }}&q={{ query|urlencode }}&status={{ status_filter }}&quick={{ quick_filter }}&page={{ tasks.next_page_number }}">Далее</a>{% endif %}
       </nav>
     {% endif %}
   </div>

@@ -27,7 +27,7 @@
       {% endif %}
     </header>
 
-    <div id="message-list" class="chat__messages scroll-area"
+    <div id="message-list" class="chat__messages scroll-area" data-dedupe-messages
          hx-get="{% url 'discussion_messages_poll' discussion.id %}"
          hx-trigger="every 4s"
          hx-swap="beforeend">
@@ -42,10 +42,12 @@
       <form id="message-composer"
             hx-post="{% url 'message_create' discussion.id %}"
             hx-target="#message-list"
-            hx-swap="beforeend">
+            hx-swap="beforeend"
+            hx-sync="this:drop"
+            hx-disabled-elt="find button[type='submit']">
         {% csrf_token %}
         {{ form.text }}
-        <button type="submit" class="btn btn-primary">Отправить</button>
+        <button type="submit" class="btn btn-primary chat__send">Отправить</button>
       </form>
       <div id="message-error">
         {% if form.text.errors %}<div class="form-error">{{ form.text.errors|join:", " }}</div>{% endif %}
@@ -57,9 +59,27 @@
   (function () {
     var list = document.getElementById('message-list');
     if (!list) return;
+    function removeDuplicateMessages() {
+      var seen = new Set();
+      list.querySelectorAll('[data-message-id]').forEach(function (message) {
+        if (seen.has(message.dataset.messageId)) {
+          message.remove();
+          return;
+        }
+        seen.add(message.dataset.messageId);
+      });
+    }
+
+    var duplicateObserver = new MutationObserver(function () {
+      removeDuplicateMessages();
+    });
+    duplicateObserver.observe(list, {childList: true});
+
     list.addEventListener('htmx:afterSwap', function () {
+      removeDuplicateMessages();
       list.scrollTop = list.scrollHeight;
     });
+    removeDuplicateMessages();
     list.scrollTop = list.scrollHeight;
   })();
 </script>

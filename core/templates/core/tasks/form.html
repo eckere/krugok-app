@@ -1,7 +1,7 @@
 <div class="modal-backdrop" data-modal-backdrop="task-modal">
-<section id="task-form" class="modal-panel" role="dialog" aria-modal="true">
+<section id="task-form" class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="task-form-title">
   <div class="modal-header">
-    <h3 class="modal-title">{% if form.instance.pk %}Редактировать задачу{% else %}Новая задача{% endif %}</h3>
+    <h3 id="task-form-title" class="modal-title">{% if form.instance.pk %}Редактировать задачу{% else %}Новая задача{% endif %}</h3>
     <button type="button" aria-label="Закрыть" data-close-modal="task-modal" class="modal-close">×</button>
   </div>
 

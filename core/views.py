@@ -3,6 +3,8 @@ core/views.py
 """
 import json
 import logging
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.contrib.auth import login, logout
@@ -80,6 +82,40 @@ from .telegram_notifications import enqueue_outbound, enqueue_task_event, notify
 
 logger = logging.getLogger(__name__)
 
+TASK_QUICK_FILTERS = {'overdue', 'today', 'no_deadline', 'done'}
+
+
+def _user_day_bounds(user):
+    try:
+        user_timezone = ZoneInfo(user.timezone)
+    except (AttributeError, ZoneInfoNotFoundError):
+        user_timezone = timezone.get_current_timezone()
+    today = timezone.now().astimezone(user_timezone).date()
+    start = datetime.combine(today, time.min, tzinfo=user_timezone)
+    return start, start + timedelta(days=1)
+
+
+def _with_project_summary(projects):
+    return projects.annotate(
+        summary_task_count=models.Count('tasks', distinct=True),
+        summary_done_count=models.Count(
+            'tasks',
+            filter=models.Q(tasks__status=Task.Status.DONE),
+            distinct=True,
+        ),
+        summary_member_count=models.Count(
+            'project_memberships',
+            distinct=True,
+        ),
+        summary_next_deadline=models.Min(
+            'tasks__deadline',
+            filter=(
+                ~models.Q(tasks__status=Task.Status.DONE)
+                & models.Q(tasks__deadline__isnull=False)
+            ),
+        ),
+    )
+
 # Все ранее существовавшие прикладные view уже были помечены
 # @login_required. Сохраняем это объявление, но добавляем к нему проверку
 # приглашения. Исключение ниже — только форма активации инвайта.
@@ -95,13 +131,9 @@ def healthcheck(request):
 
 def readiness(request):
     with connection.cursor() as cursor:
-        cursor.execute('PRAGMA integrity_check')
-        database_status = cursor.fetchone()[0]
-    status = 200 if database_status == 'ok' else 503
-    return JsonResponse(
-        {'status': 'ready' if status == 200 else 'unavailable'},
-        status=status,
-    )
+        cursor.execute('SELECT 1')
+        cursor.fetchone()
+    return JsonResponse({'status': 'ready'})
 
 
 def privacy_policy(request):
@@ -125,9 +157,20 @@ def terms_of_use(request):
 
 @app_admin_required
 def operational_status(request):
+    max_attempts = settings.TELEGRAM_NOTIFICATION_MAX_ATTEMPTS
+    stuck_before = timezone.now() - timedelta(minutes=5)
+    exhausted = OutboundMessage.objects.filter(
+        status=OutboundMessage.Status.FAILED,
+        attempt_count__gte=max_attempts,
+    ).count()
+    stuck = OutboundMessage.objects.filter(
+        status=OutboundMessage.Status.SENDING,
+        last_attempt_at__lt=stuck_before,
+    ).count()
     return JsonResponse(
         {
-            'status': 'ok',
+            'status': 'degraded' if exhausted or stuck else 'ok',
+            'release_sha': settings.APP_RELEASE_SHA,
             'outbound': {
                 'pending': OutboundMessage.objects.filter(
                     status=OutboundMessage.Status.PENDING
@@ -138,11 +181,115 @@ def operational_status(request):
                 'sending': OutboundMessage.objects.filter(
                     status=OutboundMessage.Status.SENDING
                 ).count(),
+                'exhausted': exhausted,
+                'stuck': stuck,
+                'cancelled': OutboundMessage.objects.filter(
+                    status=OutboundMessage.Status.CANCELLED
+                ).count(),
             },
             'active_users': TelegramUser.objects.filter(is_active=True).count(),
             'active_projects': Project.objects.filter(is_archived=False).count(),
         }
     )
+
+
+@app_admin_required
+def outbound_queue(request):
+    max_attempts = settings.TELEGRAM_NOTIFICATION_MAX_ATTEMPTS
+    exhausted_messages = OutboundMessage.objects.filter(
+        status=OutboundMessage.Status.FAILED,
+        attempt_count__gte=max_attempts,
+    ).select_related('recipient', 'notification').order_by('-last_attempt_at')[:100]
+    retryable_messages = OutboundMessage.objects.filter(
+        status=OutboundMessage.Status.FAILED,
+        attempt_count__lt=max_attempts,
+    ).select_related('recipient', 'notification').order_by('next_retry_at')[:50]
+    return render(
+        request,
+        'core/ops/outbound_queue.html',
+        {
+            'release_sha': settings.APP_RELEASE_SHA,
+            'max_attempts': max_attempts,
+            'exhausted_messages': exhausted_messages,
+            'retryable_messages': retryable_messages,
+            'pending_count': OutboundMessage.objects.filter(
+                status=OutboundMessage.Status.PENDING
+            ).count(),
+            'failed_count': OutboundMessage.objects.filter(
+                status=OutboundMessage.Status.FAILED
+            ).count(),
+            'cancelled_count': OutboundMessage.objects.filter(
+                status=OutboundMessage.Status.CANCELLED
+            ).count(),
+        },
+    )
+
+
+@app_admin_required
+@require_POST
+def outbound_retry(request, message_id):
+    with transaction.atomic():
+        outbound = get_object_or_404(
+            OutboundMessage.objects.select_for_update(),
+            pk=message_id,
+            status__in=[
+                OutboundMessage.Status.FAILED,
+                OutboundMessage.Status.CANCELLED,
+            ],
+        )
+        outbound.status = OutboundMessage.Status.PENDING
+        outbound.attempt_count = 0
+        outbound.last_attempt_at = None
+        outbound.next_retry_at = timezone.now()
+        outbound.error_message = ''
+        outbound.sent_at = None
+        outbound.save(
+            update_fields=[
+                'status',
+                'attempt_count',
+                'last_attempt_at',
+                'next_retry_at',
+                'error_message',
+                'sent_at',
+            ]
+        )
+        if outbound.notification_id:
+            Notification.objects.filter(pk=outbound.notification_id).update(
+                status=Notification.Status.PENDING,
+                attempt_count=0,
+                last_attempt_at=None,
+                next_retry_at=timezone.now(),
+                error_message='',
+                sent_at=None,
+            )
+        record_audit(
+            request,
+            'outbound.retry',
+            outbound,
+            changes={'message_id': outbound.pk},
+        )
+    return redirect('outbound_queue')
+
+
+@app_admin_required
+@require_POST
+def outbound_cancel(request, message_id):
+    with transaction.atomic():
+        outbound = get_object_or_404(
+            OutboundMessage.objects.select_for_update(),
+            pk=message_id,
+            status=OutboundMessage.Status.FAILED,
+        )
+        outbound.status = OutboundMessage.Status.CANCELLED
+        outbound.next_retry_at = None
+        outbound.save(update_fields=['status', 'next_retry_at'])
+        record_audit(
+            request,
+            'outbound.cancel',
+            outbound,
+            changes={'message_id': outbound.pk},
+        )
+    return redirect('outbound_queue')
 
 
 def _close_modal(response, modal_id):
@@ -167,7 +314,9 @@ def index(request):
         tasks = get_accessible_tasks(request.user).select_related(
             'project', 'assignee'
         ).order_by('status', 'deadline')
-        projects = get_accessible_projects(request.user).order_by('-created_at')
+        projects = _with_project_summary(
+            get_accessible_projects(request.user)
+        ).order_by('-created_at')
         discussions = Discussion.objects.filter(
             models.Q(created_by=request.user) | models.Q(participants=request.user)
         ).distinct()
@@ -540,6 +689,9 @@ def task_list(request):
         tasks = tasks.filter(assignee=request.user)
     query = request.GET.get('q', '').strip()
     status_filter = request.GET.get('status', '').strip()
+    quick_filter = request.GET.get('quick', '').strip()
+    if quick_filter not in TASK_QUICK_FILTERS:
+        quick_filter = ''
     if query:
         tasks = tasks.filter(
             models.Q(title__icontains=query)
@@ -548,6 +700,22 @@ def task_list(request):
         )
     if status_filter in Task.Status.values:
         tasks = tasks.filter(status=status_filter)
+    if quick_filter == 'overdue':
+        tasks = tasks.exclude(status=Task.Status.DONE).filter(
+            deadline__lt=timezone.now()
+        )
+    elif quick_filter == 'today':
+        day_start, day_end = _user_day_bounds(request.user)
+        tasks = tasks.exclude(status=Task.Status.DONE).filter(
+            deadline__gte=day_start,
+            deadline__lt=day_end,
+        )
+    elif quick_filter == 'no_deadline':
+        tasks = tasks.exclude(status=Task.Status.DONE).filter(
+            deadline__isnull=True
+        )
+    elif quick_filter == 'done':
+        tasks = tasks.filter(status=Task.Status.DONE)
     page = Paginator(tasks, 50).get_page(request.GET.get('page'))
 
     template_name = (
@@ -561,6 +729,7 @@ def task_list(request):
             'filter': filter_value,
             'query': query,
             'status_filter': status_filter,
+            'quick_filter': quick_filter,
         },
     )
 
@@ -598,14 +767,15 @@ def task_create(request):
     if request.method == 'POST':
         form = TaskForm(request.POST, user=request.user)
         if form.is_valid():
-            task = form.save(commit=False)
-            task.creator = request.user
-            task.save()
-            record_audit(request, 'task.create', task)
-            if task.deadline and task.status != Task.Status.DONE:
-                notify(task, Notification.Kind.DEADLINE_SET)
-            if task.assignee_id and task.assignee_id != request.user.pk:
-                notify(task, Notification.Kind.TASK_ASSIGNED)
+            with transaction.atomic():
+                task = form.save(commit=False)
+                task.creator = request.user
+                task.save()
+                record_audit(request, 'task.create', task)
+                if task.deadline and task.status != Task.Status.DONE:
+                    notify(task, Notification.Kind.DEADLINE_SET)
+                if task.assignee_id and task.assignee_id != request.user.pk:
+                    notify(task, Notification.Kind.TASK_ASSIGNED)
             response = render(
                 request,
                 'core/tasks/card.html',
@@ -668,52 +838,53 @@ def task_update(request, task_id):
     if request.method == 'POST':
         form = TaskForm(request.POST, instance=task, user=request.user)
         if form.is_valid():
-            task = form.save()
-            deadline_changed = old_deadline != task.deadline
-            assignee_changed = old_assignee_id != task.assignee_id
-            completed = (
-                old_status != Task.Status.DONE
-                and task.status == Task.Status.DONE
-            )
-            notifications_reset = deadline_changed or assignee_changed
-            if notifications_reset:
-                task.notifications.filter(
-                    kind__in=[
-                        Notification.Kind.DEADLINE_SET,
-                        Notification.Kind.DEADLINE_APPROACHING,
-                        Notification.Kind.DEADLINE_OVERDUE,
-                        Notification.Kind.TASK_ASSIGNED,
-                    ]
-                ).delete()
-            elif completed:
-                task.notifications.filter(
-                    kind__in=[
-                        Notification.Kind.DEADLINE_APPROACHING,
-                        Notification.Kind.DEADLINE_OVERDUE,
-                    ]
-                ).delete()
-            if (
-                notifications_reset
-                and task.deadline
-                and task.status != Task.Status.DONE
-            ):
-                notify(task, Notification.Kind.DEADLINE_SET)
-            if (
-                assignee_changed
-                and task.assignee_id
-                and task.assignee_id != request.user.pk
-            ):
-                notify(task, Notification.Kind.TASK_ASSIGNED)
-            record_audit(
-                request,
-                'task.update',
-                task,
-                changes={
-                    'deadline_changed': deadline_changed,
-                    'assignee_changed': assignee_changed,
-                    'status': task.status,
-                },
-            )
+            with transaction.atomic():
+                task = form.save()
+                deadline_changed = old_deadline != task.deadline
+                assignee_changed = old_assignee_id != task.assignee_id
+                completed = (
+                    old_status != Task.Status.DONE
+                    and task.status == Task.Status.DONE
+                )
+                notifications_reset = deadline_changed or assignee_changed
+                if notifications_reset:
+                    task.notifications.filter(
+                        kind__in=[
+                            Notification.Kind.DEADLINE_SET,
+                            Notification.Kind.DEADLINE_APPROACHING,
+                            Notification.Kind.DEADLINE_OVERDUE,
+                            Notification.Kind.TASK_ASSIGNED,
+                        ]
+                    ).delete()
+                elif completed:
+                    task.notifications.filter(
+                        kind__in=[
+                            Notification.Kind.DEADLINE_APPROACHING,
+                            Notification.Kind.DEADLINE_OVERDUE,
+                        ]
+                    ).delete()
+                if (
+                    notifications_reset
+                    and task.deadline
+                    and task.status != Task.Status.DONE
+                ):
+                    notify(task, Notification.Kind.DEADLINE_SET)
+                if (
+                    assignee_changed
+                    and task.assignee_id
+                    and task.assignee_id != request.user.pk
+                ):
+                    notify(task, Notification.Kind.TASK_ASSIGNED)
+                record_audit(
+                    request,
+                    'task.update',
+                    task,
+                    changes={
+                        'deadline_changed': deadline_changed,
+                        'assignee_changed': assignee_changed,
+                        'status': task.status,
+                    },
+                )
             if return_to == 'project':
                 redirect_url = (
                     reverse('project_detail', args=[task.project_id])
@@ -771,21 +942,22 @@ def task_status(request, task_id):
     if new_status not in Task.Status.values:
         return HttpResponse('Недопустимый статус.', status=400)
 
-    task.status = new_status
-    task.save()
-    record_audit(
-        request,
-        'task.status',
-        task,
-        changes={'status': new_status},
-    )
-    if task.status == Task.Status.DONE:
-        task.notifications.filter(
-            kind__in=[
-                Notification.Kind.DEADLINE_APPROACHING,
-                Notification.Kind.DEADLINE_OVERDUE,
-            ]
-        ).delete()
+    with transaction.atomic():
+        task.status = new_status
+        task.save()
+        record_audit(
+            request,
+            'task.status',
+            task,
+            changes={'status': new_status},
+        )
+        if task.status == Task.Status.DONE:
+            task.notifications.filter(
+                kind__in=[
+                    Notification.Kind.DEADLINE_APPROACHING,
+                    Notification.Kind.DEADLINE_OVERDUE,
+                ]
+            ).delete()
     response = render(
         request,
         'core/tasks/card.html',
@@ -804,27 +976,28 @@ def comment_create(request, task_id):
     task = get_task_or_403(task_id, request.user)
     form = CommentForm(request.POST)
     if form.is_valid():
-        comment = form.save(commit=False)
-        comment.task = task
-        comment.author = request.user
-        comment.save()
-        record_audit(request, 'comment.create', comment)
-        recipients = {
-            user.pk: user
-            for user in [task.creator, task.assignee]
-            if user is not None and user.pk != request.user.pk
-        }
-        for recipient in recipients.values():
-            enqueue_task_event(
-                task,
-                recipient=recipient,
-                kind=Notification.Kind.COMMENT_ADDED,
-                event_id=str(comment.pk),
-                text=(
-                    f'{request.user.display_name} добавил комментарий '
-                    f'к задаче «{task.title}».'
-                ),
-            )
+        with transaction.atomic():
+            comment = form.save(commit=False)
+            comment.task = task
+            comment.author = request.user
+            comment.save()
+            record_audit(request, 'comment.create', comment)
+            recipients = {
+                user.pk: user
+                for user in [task.creator, task.assignee]
+                if user is not None and user.pk != request.user.pk
+            }
+            for recipient in recipients.values():
+                enqueue_task_event(
+                    task,
+                    recipient=recipient,
+                    kind=Notification.Kind.COMMENT_ADDED,
+                    event_id=str(comment.pk),
+                    text=(
+                        f'{request.user.display_name} добавил комментарий '
+                        f'к задаче «{task.title}».'
+                    ),
+                )
         return redirect('task_detail', task_id=task.id)
 
     return render(request, 'core/tasks/detail.html', {
@@ -844,9 +1017,11 @@ def project_list(request):
     """GET /projects/ — список активных (не архивных) проектов."""
     filter_value = request.GET.get('filter', 'all')
     include_archived = filter_value == 'archived'
-    projects = get_accessible_projects(
-        request.user,
-        include_archived=include_archived,
+    projects = _with_project_summary(
+        get_accessible_projects(
+            request.user,
+            include_archived=include_archived,
+        )
     ).order_by('-created_at')
     if include_archived:
         projects = projects.filter(is_archived=True)
@@ -922,15 +1097,19 @@ def project_create(request):
     if request.method == 'POST':
         form = ProjectForm(request.POST)
         if form.is_valid():
-            project = form.save(commit=False)
-            project.owner = request.user
-            project.save()
-            ProjectMembership.objects.create(
-                project=project,
-                user=request.user,
-                role=ProjectMembership.Role.OWNER,
-            )
-            record_audit(request, 'project.create', project)
+            with transaction.atomic():
+                project = form.save(commit=False)
+                project.owner = request.user
+                project.save()
+                ProjectMembership.objects.create(
+                    project=project,
+                    user=request.user,
+                    role=ProjectMembership.Role.OWNER,
+                )
+                record_audit(request, 'project.create', project)
+            project = _with_project_summary(
+                Project.objects.filter(pk=project.pk)
+            ).get()
             response = render(request, 'core/projects/card.html', {'project': project})
             return _close_modal(response, 'project-modal')
         response = render(
@@ -954,12 +1133,16 @@ def project_update(request, project_id):
     if request.method == 'POST':
         form = ProjectForm(request.POST, instance=project)
         if form.is_valid():
-            form.save()
-            record_audit(request, 'project.update', project)
+            with transaction.atomic():
+                form.save()
+                record_audit(request, 'project.update', project)
             if return_to == 'detail':
                 return HttpResponse(
                     headers={'HX-Redirect': reverse('project_detail', args=[project.id])}
                 )
+            project = _with_project_summary(
+                Project.objects.filter(pk=project.pk)
+            ).get()
             response = render(request, 'core/projects/card.html', {'project': project})
             return _close_modal(response, 'project-modal')
         response = render(
@@ -1305,14 +1488,15 @@ def discussion_create(request):
     if request.method == 'POST':
         form = DiscussionForm(request.POST, user=request.user)
         if form.is_valid():
-            discussion = form.save(commit=False)
-            discussion.created_by = request.user
-            discussion.save()
-            # form.save_m2m() is needed to save the participants from the form
-            form.save_m2m()
-            # Add the creator to the participants
-            discussion.participants.add(request.user)
-            record_audit(request, 'discussion.create', discussion)
+            with transaction.atomic():
+                discussion = form.save(commit=False)
+                discussion.created_by = request.user
+                discussion.save()
+                # form.save_m2m() is needed to save the participants from the form
+                form.save_m2m()
+                # Add the creator to the participants
+                discussion.participants.add(request.user)
+                record_audit(request, 'discussion.create', discussion)
             return redirect('discussion_detail', discussion_id=discussion.id)
         return render(request, 'core/discussions/form.html', {'form': form}, status=422)
 
@@ -1372,23 +1556,24 @@ def message_create(request, discussion_id):
     form = MessageForm(request.POST)
 
     if form.is_valid():
-        message = form.save(commit=False)
-        message.discussion = discussion
-        message.sender = request.user
-        message.save()
-        record_audit(request, 'message.create', message)
-        for recipient in discussion.participants.exclude(
-            pk=request.user.pk
-        ).filter(is_active=True):
-            enqueue_outbound(
-                recipient=recipient,
-                kind=Notification.Kind.MESSAGE_ADDED,
-                text=(
-                    f'{request.user.display_name}: новое сообщение '
-                    f'в обсуждении «{discussion.title}».'
-                ),
-                dedupe_key=f'message:{message.pk}:{recipient.pk}',
-            )
+        with transaction.atomic():
+            message = form.save(commit=False)
+            message.discussion = discussion
+            message.sender = request.user
+            message.save()
+            record_audit(request, 'message.create', message)
+            for recipient in discussion.participants.exclude(
+                pk=request.user.pk
+            ).filter(is_active=True):
+                enqueue_outbound(
+                    recipient=recipient,
+                    kind=Notification.Kind.MESSAGE_ADDED,
+                    text=(
+                        f'{request.user.display_name}: новое сообщение '
+                        f'в обсуждении «{discussion.title}».'
+                    ),
+                    dedupe_key=f'message:{message.pk}:{recipient.pk}',
+                )
         html = render_to_string(
             'core/discussions/message.html', {'message': message}, request=request
         )

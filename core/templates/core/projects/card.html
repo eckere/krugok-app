@@ -14,10 +14,24 @@
     {% if project.description %}<div class="entity-card__description">{{ project.description }}</div>{% endif %}
     <div class="entity-card__meta">
       <span>Создан {{ project.created_at|date:'d.m.Y' }}</span>
+      <span>Участников: {{ project.summary_member_count|default:0 }}</span>
+      {% if project.summary_next_deadline %}
+        <span>Ближайший срок: {{ project.summary_next_deadline|date:'d.m.Y' }}</span>
+      {% endif %}
+    </div>
+    <div class="project-card__progress">
+      <div class="project-card__progress-label">
+        <span>Выполнено задач</span>
+        <strong>{{ project.summary_done_count|default:0 }} из {{ project.summary_task_count|default:0 }}</strong>
+      </div>
+      <progress value="{{ project.summary_done_count|default:0 }}" max="{% if project.summary_task_count %}{{ project.summary_task_count }}{% else %}1{% endif %}">
+        {{ project.summary_done_count|default:0 }} из {{ project.summary_task_count|default:0 }}
+      </progress>
     </div>
   </div>
   {% if not compact %}
     <div class="entity-card__actions">
+      <div class="entity-actions-desktop">
       {% if not project.is_archived and project|can_admin_project:user %}
       <button type="button" hx-get="{% url 'project_update' project.id %}" hx-target="#project-modal" hx-swap="innerHTML" class="btn btn-secondary btn-sm">Изменить</button>
       <button type="button"
@@ -36,6 +50,36 @@
       {% endif %}
       {% if project.is_archived and project|can_own_project:user %}
       <button type="button" hx-delete="{% url 'project_delete' project.id %}" hx-target="#project-{{ project.id }}" hx-swap="outerHTML" hx-confirm="Удалить архивный проект «{{ project.name }}» навсегда? Это действие необратимо." class="btn btn-danger btn-sm">Удалить навсегда</button>
+      {% endif %}
+      </div>
+      {% if project|can_admin_project:user %}
+      <details class="entity-actions-menu">
+        <summary aria-label="Действия с проектом {{ project.name }}" title="Действия">•••</summary>
+        <div class="entity-actions-menu__popover">
+          {% if not project.is_archived %}
+          <button type="button" hx-get="{% url 'project_update' project.id %}" hx-target="#project-modal" hx-swap="innerHTML" class="entity-actions-menu__item">Изменить</button>
+          <button type="button"
+                  hx-post="{% url 'project_archive' project.id %}"
+                  hx-target="#project-{{ project.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Архивировать проект «{{ project.name }}»?"
+                  class="entity-actions-menu__item">В архив</button>
+          {% else %}
+          <form method="post" action="{% url 'project_restore' project.id %}">
+            {% csrf_token %}
+            <button type="submit" class="entity-actions-menu__item">Восстановить</button>
+          </form>
+          {% if project|can_own_project:user %}
+          <button type="button"
+                  hx-delete="{% url 'project_delete' project.id %}"
+                  hx-target="#project-{{ project.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Удалить архивный проект «{{ project.name }}» навсегда? Это действие необратимо."
+                  class="entity-actions-menu__item entity-actions-menu__item--danger">Удалить навсегда</button>
+          {% endif %}
+          {% endif %}
+        </div>
+      </details>
       {% endif %}
     </div>
   {% endif %}

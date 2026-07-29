@@ -2,7 +2,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import RequestFactory, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -26,10 +28,14 @@ from .telegram_notifications import notify, process_outbound
 
 class PublicOperationalEndpointsTests(TestCase):
     def test_readiness_checks_database(self):
-        response = self.client.get(reverse('readiness'))
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(reverse('readiness'))
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'status': 'ready'})
+        self.assertFalse(
+            any('integrity_check' in query['sql'].lower() for query in queries)
+        )
 
     def test_legal_pages_are_public(self):
         privacy = self.client.get(reverse('privacy_policy'))
@@ -338,22 +344,240 @@ class RateLimitTests(TestCase):
 
 @override_settings(TELEGRAM_ADMIN_IDS=frozenset({777}))
 class OperationalStatusTests(TestCase):
-    def test_only_app_admin_can_read_status(self):
-        regular = get_user_model().objects.create_user(
+    def setUp(self):
+        self.regular = get_user_model().objects.create_user(
             username='ops_regular',
             telegram_id=778,
             is_verified=True,
         )
-        admin = get_user_model().objects.create_user(
+        self.admin = get_user_model().objects.create_user(
             username='ops_admin',
             telegram_id=777,
             is_verified=True,
         )
-        self.client.force_login(regular)
+
+    def test_only_app_admin_can_read_status(self):
+        self.client.force_login(self.regular)
         denied = self.client.get(reverse('operational_status'))
-        self.client.force_login(admin)
+        self.client.force_login(self.admin)
         allowed = self.client.get(reverse('operational_status'))
 
         self.assertEqual(denied.status_code, 403)
         self.assertEqual(allowed.status_code, 200)
         self.assertIn('outbound', allowed.json())
+
+    @override_settings(APP_RELEASE_SHA='abc123')
+    def test_status_exposes_release_and_degraded_queue(self):
+        OutboundMessage.objects.create(
+            recipient=self.admin,
+            kind=Notification.Kind.MESSAGE_ADDED,
+            dedupe_key='ops:exhausted',
+            text='Failed',
+            status=OutboundMessage.Status.FAILED,
+            attempt_count=5,
+        )
+        self.client.force_login(self.admin)
+
+        payload = self.client.get(reverse('operational_status')).json()
+
+        self.assertEqual(payload['release_sha'], 'abc123')
+        self.assertEqual(payload['status'], 'degraded')
+        self.assertEqual(payload['outbound']['exhausted'], 1)
+
+    def test_admin_can_retry_and_cancel_exhausted_messages(self):
+        retried = OutboundMessage.objects.create(
+            recipient=self.admin,
+            kind=Notification.Kind.MESSAGE_ADDED,
+            dedupe_key='ops:retry',
+            text='Retry',
+            status=OutboundMessage.Status.FAILED,
+            attempt_count=5,
+            error_message='Network error',
+        )
+        cancelled = OutboundMessage.objects.create(
+            recipient=self.admin,
+            kind=Notification.Kind.MESSAGE_ADDED,
+            dedupe_key='ops:cancel',
+            text='Cancel',
+            status=OutboundMessage.Status.FAILED,
+            attempt_count=5,
+        )
+        self.client.force_login(self.admin)
+
+        queue = self.client.get(reverse('outbound_queue'))
+        retry_response = self.client.post(
+            reverse('outbound_retry', args=[retried.pk])
+        )
+        cancel_response = self.client.post(
+            reverse('outbound_cancel', args=[cancelled.pk])
+        )
+
+        self.assertContains(queue, 'Network error')
+        self.assertEqual(retry_response.status_code, 302)
+        self.assertEqual(cancel_response.status_code, 302)
+        retried.refresh_from_db()
+        cancelled.refresh_from_db()
+        self.assertEqual(retried.status, OutboundMessage.Status.PENDING)
+        self.assertEqual(retried.attempt_count, 0)
+        self.assertEqual(retried.error_message, '')
+        self.assertEqual(cancelled.status, OutboundMessage.Status.CANCELLED)
+        self.assertTrue(
+            AuditLog.objects.filter(action='outbound.retry').exists()
+        )
+        self.assertTrue(
+            AuditLog.objects.filter(action='outbound.cancel').exists()
+        )
+
+    def test_regular_user_cannot_open_queue(self):
+        self.client.force_login(self.regular)
+
+        response = self.client.get(reverse('outbound_queue'))
+
+        self.assertEqual(response.status_code, 403)
+
+
+class ThemeAndListUxTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username='ux_user',
+            telegram_id=901,
+            is_verified=True,
+        )
+        self.project = Project.objects.create(
+            name='UX project',
+            owner=self.user,
+        )
+        ProjectMembership.objects.create(
+            project=self.project,
+            user=self.user,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.client.force_login(self.user)
+
+    def test_profile_saves_and_applies_explicit_dark_theme(self):
+        response = self.client.post(
+            reverse('profile_settings'),
+            {
+                'theme_preference': 'dark',
+                'timezone': 'Europe/Moscow',
+                'notify_deadlines': 'on',
+                'notify_assignments': 'on',
+                'notify_comments': 'on',
+                'notify_messages': 'on',
+            },
+            follow=True,
+        )
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.theme_preference, 'dark')
+        self.assertContains(response, 'data-theme="dark"')
+        self.assertContains(response, 'theme-picker')
+
+    def test_task_quick_filter_and_compact_search(self):
+        overdue = Task.objects.create(
+            title='Overdue task',
+            project=self.project,
+            creator=self.user,
+            deadline=timezone.now() - timedelta(hours=1),
+        )
+        Task.objects.create(
+            title='Upcoming task',
+            project=self.project,
+            creator=self.user,
+            deadline=timezone.now() + timedelta(days=2),
+        )
+
+        response = self.client.get(
+            reverse('task_list'),
+            {'quick': 'overdue'},
+        )
+
+        self.assertContains(response, overdue.title)
+        self.assertNotContains(response, 'Upcoming task')
+        self.assertContains(response, 'toolbar__search--tasks')
+        self.assertContains(response, 'search-field')
+        self.assertContains(response, 'entity-actions-menu')
+
+    def test_project_cards_show_task_progress_and_member_count(self):
+        Task.objects.create(
+            title='Done',
+            project=self.project,
+            creator=self.user,
+            status=Task.Status.DONE,
+        )
+        Task.objects.create(
+            title='Open',
+            project=self.project,
+            creator=self.user,
+        )
+
+        response = self.client.get(reverse('project_list'))
+
+        self.assertContains(response, '1 из 2')
+        self.assertContains(response, 'Участников: 1')
+        self.assertContains(response, 'project-card__progress')
+
+
+class AtomicBusinessOperationTests(TestCase):
+    def setUp(self):
+        self.author = get_user_model().objects.create_user(
+            username='atomic_author',
+            telegram_id=1001,
+            is_verified=True,
+        )
+        self.recipient = get_user_model().objects.create_user(
+            username='atomic_recipient',
+            telegram_id=1002,
+            is_verified=True,
+        )
+        self.client.force_login(self.author)
+
+    @patch('core.views.notify', side_effect=RuntimeError('queue unavailable'))
+    def test_task_and_audit_roll_back_when_enqueue_fails(self, _notify):
+        with self.assertRaises(RuntimeError):
+            self.client.post(
+                reverse('task_create'),
+                {
+                    'title': 'Atomic task',
+                    'description': '',
+                    'project': '',
+                    'stage': '',
+                    'assignee': '',
+                    'deadline': (
+                        timezone.now() + timedelta(days=1)
+                    ).strftime('%Y-%m-%dT%H:%M'),
+                    'status': Task.Status.NEW,
+                },
+            )
+
+        self.assertFalse(Task.objects.filter(title='Atomic task').exists())
+        self.assertFalse(
+            AuditLog.objects.filter(action='task.create').exists()
+        )
+
+    @patch(
+        'core.views.enqueue_outbound',
+        side_effect=RuntimeError('queue unavailable'),
+    )
+    def test_message_and_audit_roll_back_when_enqueue_fails(self, _enqueue):
+        discussion = Discussion.objects.create(
+            title='Atomic chat',
+            created_by=self.author,
+        )
+        discussion.participants.add(self.author, self.recipient)
+
+        with self.assertRaises(RuntimeError):
+            self.client.post(
+                reverse('message_create', args=[discussion.pk]),
+                {'text': 'Atomic message'},
+            )
+
+        self.assertFalse(
+            Message.objects.filter(
+                discussion=discussion,
+                text='Atomic message',
+            ).exists()
+        )
+        self.assertFalse(
+            AuditLog.objects.filter(action='message.create').exists()
+        )

@@ -21,13 +21,6 @@
     </div>
   </div>
   <div class="entity-card__actions">
-      {% if task|can_manage_task:user %}
-      <button type="button"
-              hx-get="{% url 'task_update' task.id %}{% if task_project_context %}?return_to=project{% endif %}"
-              hx-target="#task-modal"
-              hx-swap="innerHTML"
-              class="btn btn-secondary btn-sm">Изменить</button>
-      {% endif %}
       {% if task|can_update_task_status:user %}
       <label class="status-control">
         <span class="sr-only">Статус задачи {{ task.title }}</span>
@@ -47,7 +40,30 @@
       </label>
       {% endif %}
       {% if task|can_manage_task:user %}
-      <button type="button" hx-delete="{% url 'task_delete' task.id %}" hx-target="#task-{{ task.id }}" hx-swap="outerHTML" hx-confirm="Удалить задачу?" class="btn btn-danger btn-sm">Удалить</button>
+      <div class="entity-actions-desktop">
+        <button type="button"
+                hx-get="{% url 'task_update' task.id %}{% if task_project_context %}?return_to=project{% endif %}"
+                hx-target="#task-modal"
+                hx-swap="innerHTML"
+                class="btn btn-secondary btn-sm">Изменить</button>
+        <button type="button" hx-delete="{% url 'task_delete' task.id %}" hx-target="#task-{{ task.id }}" hx-swap="outerHTML" hx-confirm="Удалить задачу?" class="btn btn-danger btn-sm">Удалить</button>
+      </div>
+      <details class="entity-actions-menu">
+        <summary aria-label="Действия с задачей {{ task.title }}" title="Действия">•••</summary>
+        <div class="entity-actions-menu__popover">
+          <button type="button"
+                  hx-get="{% url 'task_update' task.id %}{% if task_project_context %}?return_to=project{% endif %}"
+                  hx-target="#task-modal"
+                  hx-swap="innerHTML"
+                  class="entity-actions-menu__item">Изменить</button>
+          <button type="button"
+                  hx-delete="{% url 'task_delete' task.id %}"
+                  hx-target="#task-{{ task.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Удалить задачу?"
+                  class="entity-actions-menu__item entity-actions-menu__item--danger">Удалить</button>
+        </div>
+      </details>
       {% endif %}
   </div>
 </article>

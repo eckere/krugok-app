@@ -12,6 +12,16 @@ from core.models import OutboundMessage
 class Command(BaseCommand):
     help = 'Проверяет БД и критичные очереди; ненулевой код означает проблему.'
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--allow-queue-degraded',
+            action='store_true',
+            help=(
+                'Не прерывать релиз из-за уже известных проблем очереди; '
+                'integrity_check БД остаётся обязательным.'
+            ),
+        )
+
     def handle(self, *args, **options):
         database_path = Path(settings.DATABASES['default']['NAME'])
         connection = sqlite3.connect(
@@ -34,7 +44,10 @@ class Command(BaseCommand):
             last_attempt_at__lt=timezone.now() - timedelta(minutes=10),
         ).count()
         if exhausted or stuck:
-            raise CommandError(
+            message = (
                 f'Проблемы очереди: исчерпано={exhausted}, зависло={stuck}.'
             )
+            if not options['allow_queue_degraded']:
+                raise CommandError(message)
+            self.stdout.write(self.style.WARNING(message))
         self.stdout.write(self.style.SUCCESS('Operational health: ok.'))

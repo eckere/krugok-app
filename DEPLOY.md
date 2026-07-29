@@ -46,10 +46,12 @@ sudo ufw route allow out on "$external_iface" from 172.16.0.0/12
 ## Первый запуск
 
 ```sh
-docker compose --env-file .env.production config --quiet
-docker compose --env-file .env.production up -d --build
-docker compose ps
-docker compose logs --tail=150 web deadline-worker backup-worker caddy
+APP_RELEASE_SHA="$(git rev-parse --short=12 HEAD)" \
+  docker compose --project-name krugok-app --env-file .env.production config --quiet
+APP_RELEASE_SHA="$(git rev-parse --short=12 HEAD)" \
+  docker compose --project-name krugok-app --env-file .env.production up -d --build --wait
+docker compose --project-name krugok-app ps
+docker compose --project-name krugok-app logs --tail=150 web deadline-worker backup-worker caddy
 curl -fsS "https://${APP_DOMAIN}/healthz/"
 curl -fsS "https://${APP_DOMAIN}/readyz/"
 ```
@@ -62,18 +64,27 @@ Caddy получает сертификат автоматически. `web` п
 
 ## Безопасное обновление
 
+Сначала обновите рабочую копию до нужного commit, затем запустите штатный
+сценарий релиза:
+
 ```sh
-docker compose --env-file .env.production exec -T web \
-  python manage.py backup_database --output-dir /backups --retain-days 14
 git pull --ff-only
-docker compose --env-file .env.production build
-docker compose --env-file .env.production up -d
-docker compose --env-file .env.production exec -T web \
-  python manage.py check_operational_health
+sh docker/deploy.sh
 curl -fsS "https://${APP_DOMAIN}/readyz/"
 ```
 
-Не удаляйте старый образ до smoke-проверки. После успешной проверки:
+Скрипт всегда использует Compose project `krugok-app`, поэтому запуск из другого
+каталога не создаст новые пустые тома. Перед обновлением он делает резервную
+копию SQLite и сохраняет текущий образ под меткой `rollback-*`. Затем ожидает
+healthcheck всех сервисов, запускает эксплуатационную проверку и внутренний
+smoke-test `/readyz/`. Если проверка падает, предыдущий образ возвращается
+автоматически; при несовместимой миграции БД восстановите созданную копию по
+инструкции из `OPERATIONS.md`. Известные ошибки очереди выводятся предупреждением
+и не блокируют установку версии с экраном для их разбора; повреждение БД всё
+равно прерывает релиз.
+
+Не удаляйте rollback-образ до отдельной проверки интерфейса. После успешной
+проверки:
 
 ```sh
 docker image prune -f

@@ -1,3 +1,5 @@
+name: krugok-app
+
 services:
   web:
     image: krugok-app:latest
@@ -6,6 +8,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    environment:
+      APP_RELEASE_SHA: ${APP_RELEASE_SHA:-unknown}
     extra_hosts:
       - "api.telegram.org:${TELEGRAM_API_IPV4:-149.154.167.220}"
     volumes:
@@ -35,6 +39,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    environment:
+      APP_RELEASE_SHA: ${APP_RELEASE_SHA:-unknown}
     extra_hosts:
       - "api.telegram.org:${TELEGRAM_API_IPV4:-149.154.167.220}"
     command: ["sh", "/app/docker/deadline-worker.sh"]
@@ -65,6 +71,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
+    environment:
+      APP_RELEASE_SHA: ${APP_RELEASE_SHA:-unknown}
     command: ["sh", "/app/docker/backup-worker.sh"]
     volumes:
       - sqlite_data:/app/data
@@ -103,6 +111,12 @@ services:
     depends_on:
       web:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     logging:
       options:
         max-size: "10m"

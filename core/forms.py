@@ -345,6 +345,7 @@ class ProfileSettingsForm(forms.ModelForm):
     class Meta:
         model = TelegramUser
         fields = [
+            'theme_preference',
             'timezone',
             'notify_deadlines',
             'notify_assignments',
@@ -352,11 +353,15 @@ class ProfileSettingsForm(forms.ModelForm):
             'notify_messages',
         ]
         labels = {
+            'theme_preference': 'Тема приложения',
             'timezone': 'Часовой пояс',
             'notify_deadlines': 'Дедлайны',
             'notify_assignments': 'Назначения задач',
             'notify_comments': 'Комментарии',
             'notify_messages': 'Сообщения',
+        }
+        widgets = {
+            'theme_preference': forms.RadioSelect(),
         }
 
     def clean_timezone(self):

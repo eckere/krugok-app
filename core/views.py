@@ -587,6 +587,125 @@ def invite_revoke(request, invite_id):
     return redirect('invite_list')
 
 
+@app_admin_required
+def user_list(request):
+    filter_value = request.GET.get('filter', 'all')
+    if filter_value not in {'all', 'active', 'deleted'}:
+        filter_value = 'all'
+    query = request.GET.get('q', '').strip()
+
+    users = TelegramUser.objects.annotate(
+        active_owned_project_count=models.Count(
+            'owned_projects',
+            filter=models.Q(owned_projects__is_archived=False),
+            distinct=True,
+        ),
+        project_membership_count=models.Count(
+            'project_memberships',
+            distinct=True,
+        ),
+    )
+    if filter_value == 'active':
+        users = users.filter(is_active=True)
+    elif filter_value == 'deleted':
+        users = users.filter(is_active=False)
+    if query:
+        search_filter = (
+            models.Q(first_name__icontains=query)
+            | models.Q(last_name__icontains=query)
+            | models.Q(username__icontains=query)
+            | models.Q(telegram_username__icontains=query)
+        )
+        if query.isdigit():
+            search_filter |= models.Q(telegram_id=int(query))
+        users = users.filter(search_filter)
+
+    users = users.order_by(
+        '-is_active',
+        'first_name',
+        'last_name',
+        'username',
+    )
+    page = Paginator(users, 50).get_page(request.GET.get('page'))
+    for listed_user in page.object_list:
+        listed_user.is_global_admin = is_app_admin(listed_user)
+        listed_user.is_current_admin = listed_user.pk == request.user.pk
+        listed_user.can_be_removed = bool(
+            listed_user.is_active
+            and not listed_user.is_global_admin
+            and not listed_user.is_current_admin
+            and listed_user.active_owned_project_count == 0
+        )
+
+    admin_filter = (
+        models.Q(is_superuser=True)
+        | models.Q(telegram_id__in=settings.TELEGRAM_ADMIN_IDS)
+    )
+    context = {
+        'listed_users': page,
+        'filter': filter_value,
+        'query': query,
+        'removed': request.GET.get('removed') == '1',
+        'user_stats': {
+            'total': TelegramUser.objects.count(),
+            'active': TelegramUser.objects.filter(is_active=True).count(),
+            'deleted': TelegramUser.objects.filter(is_active=False).count(),
+            'admins': TelegramUser.objects.filter(
+                is_active=True,
+            ).filter(admin_filter).count(),
+        },
+    }
+    template_name = (
+        'core/users/list_items.html' if request.htmx else 'core/users/list.html'
+    )
+    return render(request, template_name, context)
+
+
+@app_admin_required
+@require_POST
+def user_remove(request, user_id):
+    with transaction.atomic():
+        target = get_object_or_404(
+            TelegramUser.objects.select_for_update(),
+            pk=user_id,
+            is_active=True,
+        )
+        if target.pk == request.user.pk or is_app_admin(target):
+            raise PermissionDenied
+        active_projects = target.owned_projects.filter(is_archived=False)
+        if active_projects.exists():
+            return HttpResponse(
+                'Сначала передайте владение активными проектами '
+                'или архивируйте их.',
+                status=409,
+            )
+
+        target.assigned_tasks.update(assignee=None)
+        target.project_memberships.exclude(project__owner=target).delete()
+        target.discussions.clear()
+        target.outbound_messages.filter(
+            status__in=[
+                OutboundMessage.Status.PENDING,
+                OutboundMessage.Status.SENDING,
+                OutboundMessage.Status.FAILED,
+            ]
+        ).update(
+            status=OutboundMessage.Status.CANCELLED,
+            next_retry_at=None,
+        )
+        record_audit(
+            request,
+            'user.remove',
+            target,
+            changes={'user_id': target.pk},
+        )
+        target.anonymize()
+    redirect_url = f"{reverse('user_list')}?removed=1"
+    if request.htmx:
+        return HttpResponse(headers={'HX-Redirect': redirect_url})
+    return redirect(redirect_url)
+
+
 @login_required
 def profile_detail(request, user_id):
     profile_user = get_object_or_404(TelegramUser, pk=user_id, is_active=True)

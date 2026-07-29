@@ -1446,7 +1446,7 @@ class AdminNavigationTests(TestCase):
         )
         self.client.force_login(app_admin)
 
-        response = self.client.get(reverse('invite_list'))
+        response = self.client.get(reverse('user_list'))
 
         self.assertEqual(response.status_code, 200)
 
@@ -1461,10 +1461,10 @@ class AdminNavigationTests(TestCase):
         response = self.client.get(reverse('index'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, '>Пригласить<')
+        self.assertNotContains(response, '>Пользователи<')
 
     @override_settings(TELEGRAM_ADMIN_IDS=frozenset({737320461}))
-    def test_app_admin_sees_invitation_section_and_profile_link(self):
+    def test_app_admin_sees_user_section_and_profile_link(self):
         app_admin = get_user_model().objects.create_user(
             username='navigation_app_admin',
             telegram_id=737320461,
@@ -1474,7 +1474,7 @@ class AdminNavigationTests(TestCase):
         response = self.client.get(reverse('index'))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '>Пригласить<')
+        self.assertContains(response, '>Пользователи<')
         self.assertContains(
             response,
             reverse('profile_detail', args=[app_admin.id]),

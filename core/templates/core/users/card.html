@@ -1,0 +1,70 @@
+<article id="user-card-{{ listed_user.id }}" class="user-card {% if not listed_user.is_active %}user-card--inactive{% endif %}">
+  <div class="user-card__avatar" aria-hidden="true">
+    {% if listed_user.is_active and listed_user.photo_url %}
+      <img src="{{ listed_user.photo_url }}" alt="">
+    {% elif listed_user.is_active %}
+      {{ listed_user.first_name|default:listed_user.username|first|upper }}
+    {% else %}
+      ×
+    {% endif %}
+  </div>
+  <div class="user-card__content">
+    <div class="user-card__heading">
+      <h2 class="user-card__name">
+        {% if listed_user.is_active %}
+          <a href="{% url 'profile_detail' listed_user.id %}">{{ listed_user.display_name }}</a>
+        {% else %}
+          Удалённый пользователь #{{ listed_user.id }}
+        {% endif %}
+      </h2>
+      <div class="user-card__badges">
+        {% if listed_user.is_current_admin %}<span class="chip chip--blue">Это вы</span>{% endif %}
+        {% if listed_user.is_global_admin %}<span class="chip chip--amber">Глобальный админ</span>{% endif %}
+        {% if listed_user.is_active %}
+          <span class="chip chip--green">Активен</span>
+        {% else %}
+          <span class="chip chip--red">Удалён</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="user-card__meta">
+      {% if listed_user.is_active and listed_user.public_username %}<span>@{{ listed_user.public_username }}</span>{% endif %}
+      {% if listed_user.is_active and listed_user.telegram_id %}<span>Telegram ID: {{ listed_user.telegram_id }}</span>{% endif %}
+      <span>Проектов: {{ listed_user.project_membership_count }}</span>
+      <span>Регистрация: {{ listed_user.date_joined|date:'d.m.Y' }}</span>
+      {% if listed_user.is_active %}<span>Был в приложении: {{ listed_user.last_seen|date:'d.m.Y, H:i' }}</span>{% endif %}
+    </div>
+    {% if listed_user.is_active and not listed_user.is_global_admin and not listed_user.is_current_admin and listed_user.active_owned_project_count %}
+      <div class="user-card__blocker">
+        Нельзя удалить: сначала передайте или архивируйте проекты во владении — {{ listed_user.active_owned_project_count }}.
+      </div>
+    {% endif %}
+  </div>
+  {% if listed_user.can_be_removed %}
+    <div class="user-card__actions">
+      <form method="post"
+            action="{% url 'user_remove' listed_user.id %}"
+            hx-post="{% url 'user_remove' listed_user.id %}"
+            hx-target="#user-card-{{ listed_user.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Удалить пользователя «{{ listed_user.display_name }}»? Доступ будет отозван, а персональные данные обезличены.">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger btn-sm">Удалить</button>
+      </form>
+      <details class="entity-actions-menu">
+        <summary aria-label="Действия с пользователем {{ listed_user.display_name }}" title="Действия">•••</summary>
+        <div class="entity-actions-menu__popover">
+          <form method="post"
+                action="{% url 'user_remove' listed_user.id %}"
+                hx-post="{% url 'user_remove' listed_user.id %}"
+                hx-target="#user-card-{{ listed_user.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Удалить пользователя «{{ listed_user.display_name }}»? Доступ будет отозван, а персональные данные обезличены.">
+            {% csrf_token %}
+            <button type="submit" class="entity-actions-menu__item entity-actions-menu__item--danger">Удалить пользователя</button>
+          </form>
+        </div>
+      </details>
+    </div>
+  {% endif %}
+</article>

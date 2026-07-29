@@ -46,9 +46,9 @@
                     <span>Обсуждения</span>
                 </a>
                 {% if is_app_admin %}
-                <a href="{% url 'invite_list' %}" class="app-nav__link {% if 'invite' in current %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 15v6m-3-3h6M7 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm10 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6ZM3.5 20a3.5 3.5 0 0 1 7 0m3 0a3.5 3.5 0 0 1 7 0"/></svg>
-                    <span>Пригласить</span>
+                <a href="{% url 'user_list' %}" class="app-nav__link {% if 'user_' in current or 'invite' in current %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Пользователи</span>
                 </a>
                 {% endif %}
             </div>
@@ -294,7 +294,7 @@
             }
 
             var backButton = webApp.BackButton;
-            var isTopLevelPage = {% if request.resolver_match.url_name == 'index' or request.resolver_match.url_name == 'task_list' or request.resolver_match.url_name == 'project_list' %}true{% else %}false{% endif %};
+            var isTopLevelPage = {% if request.resolver_match.url_name == 'index' or request.resolver_match.url_name == 'task_list' or request.resolver_match.url_name == 'project_list' or request.resolver_match.url_name == 'user_list' %}true{% else %}false{% endif %};
             if (backButton) {
                 if (isTopLevelPage) {
                     backButton.hide();

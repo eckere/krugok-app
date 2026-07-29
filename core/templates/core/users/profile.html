@@ -14,6 +14,7 @@
     </div>
     <div class="page-header__actions">
       {% if is_app_admin %}
+        <a href="{% url 'user_list' %}" class="btn btn-secondary">Пользователи</a>
         <a href="{% url 'outbound_queue' %}" class="btn btn-secondary">Состояние системы</a>
       {% endif %}
       <a href="{% url 'index' %}" class="btn btn-secondary">На главную</a>

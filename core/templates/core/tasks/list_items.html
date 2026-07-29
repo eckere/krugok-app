@@ -19,7 +19,7 @@
       <label class="sr-only" for="task-search">Поиск задач</label>
       <input id="task-search" name="q" value="{{ query }}" placeholder="Поиск задач">
       <label class="sr-only" for="task-status-filter">Статус</label>
-      <select id="task-status-filter" name="status">
+      <select id="task-status-filter" name="status" data-custom-select="true">
         <option value="">Все статусы</option>
         <option value="new" {% if status_filter == 'new' %}selected{% endif %}>Новая</option>
         <option value="in_progress" {% if status_filter == 'in_progress' %}selected{% endif %}>В процессе</option>

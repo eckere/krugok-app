@@ -1,7 +1,7 @@
 <div class="modal-backdrop" data-modal-backdrop="stage-modal">
-<section id="stage-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true">
+<section id="stage-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true" aria-labelledby="stage-form-title">
   <div class="modal-header">
-    <h3 class="modal-title">{% if form.instance.pk %}Редактировать этап{% else %}Новый этап{% endif %}</h3>
+    <h3 id="stage-form-title" class="modal-title">{% if form.instance.pk %}Редактировать этап{% else %}Новый этап{% endif %}</h3>
     <button type="button" aria-label="Закрыть" data-close-modal="stage-modal" class="modal-close">×</button>
   </div>
 

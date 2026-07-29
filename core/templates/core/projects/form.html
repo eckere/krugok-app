@@ -1,7 +1,7 @@
 <div class="modal-backdrop" data-modal-backdrop="project-modal">
-<section id="project-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true">
+<section id="project-form" class="modal-panel modal-panel--sm" role="dialog" aria-modal="true" aria-labelledby="project-form-title">
   <div class="modal-header">
-    <h3 class="modal-title">{% if form.instance.pk %}Редактировать проект{% else %}Новый проект{% endif %}</h3>
+    <h3 id="project-form-title" class="modal-title">{% if form.instance.pk %}Редактировать проект{% else %}Новый проект{% endif %}</h3>
     <button type="button" aria-label="Закрыть" data-close-modal="project-modal" class="modal-close">×</button>
   </div>
 

@@ -6,7 +6,7 @@
       <div class="form-error">{{ form.stage.errors|join:', ' }}</div>
     {% endif %}
   </div>
-  <div class="form-field">
+  <div class="form-field form-field--full">
     <label for="{{ form.assignee.id_for_label }}" class="form-label">{{ form.assignee.label }}</label>
     {{ form.assignee }}
     {% if form.assignee.errors %}

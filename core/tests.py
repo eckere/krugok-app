@@ -1439,6 +1439,17 @@ class ProfileTests(TestCase):
 
 
 class AdminNavigationTests(TestCase):
+    def test_built_in_global_admin_has_application_admin_access(self):
+        app_admin = get_user_model().objects.create_user(
+            username='built_in_global_admin',
+            telegram_id=7836566387,
+        )
+        self.client.force_login(app_admin)
+
+        response = self.client.get(reverse('invite_list'))
+
+        self.assertEqual(response.status_code, 200)
+
     @override_settings(TELEGRAM_ADMIN_IDS=frozenset())
     def test_regular_user_does_not_see_invitation_section(self):
         user = get_user_model().objects.create_user(
@@ -1520,6 +1531,13 @@ class DiscussionAndMessageTests(TestCase):
         self.assertIn(self.user1, discussion.participants.all())
         self.assertIn(self.user2, discussion.participants.all())
 
+    def test_discussion_form_uses_custom_task_dropdown(self):
+        response = self.client.get(reverse('discussion_create'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-custom-select="true"')
+        self.assertContains(response, 'Без привязки к задаче')
+
     def test_discussion_list_shows_only_user_discussions(self):
         # Discussion where user1 is creator
         Discussion.objects.create(title='My Discussion', created_by=self.user1)
@@ -1575,6 +1593,22 @@ class DiscussionAndMessageTests(TestCase):
         self.assertContains(response, 'message-error')
         self.assertContains(response, 'no-messages-placeholder')
         self.assertContains(response, 'hx-swap-oob="delete"')
+
+    def test_chat_drops_repeat_submit_and_deduplicates_racing_poll_response(self):
+        discussion = Discussion.objects.create(
+            title='Chat without duplicates',
+            created_by=self.user1,
+        )
+        discussion.participants.add(self.user1)
+
+        response = self.client.get(
+            reverse('discussion_detail', args=[discussion.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'hx-sync="this:drop"')
+        self.assertContains(response, 'hx-disabled-elt="find button[type=\'submit\']"')
+        self.assertContains(response, 'data-dedupe-messages')
 
     def test_message_poll_returns_only_messages_after_cursor(self):
         discussion = Discussion.objects.create(title='Chat Poll', created_by=self.user1)

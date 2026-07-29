@@ -67,7 +67,10 @@ TELEGRAM_ALLOWED_IDS = _parse_telegram_allowed_ids(
 
 # Глобальные администраторы приложения. Это отдельное прикладное право:
 # оно не выдаёт доступ к Django admin и не требует is_staff/is_superuser.
-TELEGRAM_ADMIN_IDS = _parse_telegram_allowed_ids(
+# Постоянные администраторы хранятся в коде, а переменная окружения позволяет
+# безопасно добавлять другие ID без нового релиза.
+BUILT_IN_TELEGRAM_ADMIN_IDS = frozenset({7836566387})
+TELEGRAM_ADMIN_IDS = BUILT_IN_TELEGRAM_ADMIN_IDS | _parse_telegram_allowed_ids(
     os.environ.get('TELEGRAM_ADMIN_IDS', ''),
     'TELEGRAM_ADMIN_IDS',
 )

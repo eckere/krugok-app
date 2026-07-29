@@ -20,6 +20,12 @@ from .permissions import (
     get_collaborators,
 )
 
+FORM_CONTROL_CLASS = 'w-full rounded-md border border-gray-300 px-3 py-2'
+CUSTOM_SELECT_ATTRS = {
+    'class': FORM_CONTROL_CLASS,
+    'data-custom-select': 'true',
+}
+
 
 class DiscussionForm(forms.ModelForm):
     participants = forms.ModelMultipleChoiceField(
@@ -33,8 +39,8 @@ class DiscussionForm(forms.ModelForm):
         model = Discussion
         fields = ['title', 'task', 'participants']
         widgets = {
-            'title': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'task': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+            'title': forms.TextInput(attrs={'class': FORM_CONTROL_CLASS}),
+            'task': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
         }
 
     def __init__(self, *args, **kwargs):
@@ -45,6 +51,7 @@ class DiscussionForm(forms.ModelForm):
                 self.user
             ).exclude(pk=self.user.pk)
             self.fields['task'].queryset = get_accessible_tasks(self.user)
+            self.fields['task'].empty_label = 'Без привязки к задаче'
 
     def clean(self):
         cleaned_data = super().clean()
@@ -86,7 +93,12 @@ class MessageForm(forms.ModelForm):
         model = Message
         fields = ['text']
         widgets = {
-            'text': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 2, 'placeholder': 'Написать сообщение...'}),
+            'text': forms.Textarea(attrs={
+                'class': FORM_CONTROL_CLASS,
+                'rows': 2,
+                'placeholder': 'Написать сообщение…',
+                'aria-label': 'Текст сообщения',
+            }),
         }
         labels = {
             'text': '',
@@ -97,7 +109,9 @@ class TaskForm(forms.ModelForm):
     deadline = forms.DateTimeField(
         required=False,
         label='Дедлайн',
-        widget=forms.DateTimeInput(attrs={'type': 'datetime-local', 'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+        widget=forms.DateTimeInput(
+            attrs={'type': 'datetime-local', 'class': FORM_CONTROL_CLASS}
+        ),
     )
 
     class Meta:
@@ -112,12 +126,14 @@ class TaskForm(forms.ModelForm):
             'status': 'Статус',
         }
         widgets = {
-            'title': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'description': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 4}),
-            'project': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'stage': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'assignee': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'status': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+            'title': forms.TextInput(attrs={'class': FORM_CONTROL_CLASS}),
+            'description': forms.Textarea(
+                attrs={'class': FORM_CONTROL_CLASS, 'rows': 4}
+            ),
+            'project': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'stage': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'assignee': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'status': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
         }
 
     def __init__(self, *args, **kwargs):
@@ -128,6 +144,9 @@ class TaskForm(forms.ModelForm):
 
         projects = get_accessible_projects(self.user)
         self.fields['project'].queryset = projects
+        self.fields['project'].empty_label = 'Без проекта'
+        self.fields['stage'].empty_label = 'Без этапа'
+        self.fields['assignee'].empty_label = 'Не назначен'
         self.fields['project'].widget.attrs.update(
             {
                 'hx-get': reverse('task_form_options'),
@@ -183,8 +202,13 @@ class ProjectForm(forms.ModelForm):
             'description': 'Описание',
         }
         widgets = {
-            'name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'placeholder': 'Например, «Курс по истории — Древний мир»'}),
-            'description': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 3}),
+            'name': forms.TextInput(attrs={
+                'class': FORM_CONTROL_CLASS,
+                'placeholder': 'Например, «Курс по истории — Древний мир»',
+            }),
+            'description': forms.Textarea(
+                attrs={'class': FORM_CONTROL_CLASS, 'rows': 3}
+            ),
         }
 
 
@@ -193,12 +217,8 @@ class ProjectMembershipCreateForm(forms.ModelForm):
         model = ProjectMembership
         fields = ['user', 'role']
         widgets = {
-            'user': forms.Select(
-                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
-            ),
-            'role': forms.Select(
-                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
-            ),
+            'user': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'role': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
         }
         labels = {
             'user': 'Пользователь',
@@ -218,6 +238,7 @@ class ProjectMembershipCreateForm(forms.ModelForm):
             else TelegramUser.objects.none()
         )
         self.fields['user'].queryset = users.exclude(pk__in=existing_user_ids)
+        self.fields['user'].empty_label = 'Выберите участника'
         self.fields['role'].choices = [
             (ProjectMembership.Role.ADMIN, ProjectMembership.Role.ADMIN.label),
             (ProjectMembership.Role.MEMBER, ProjectMembership.Role.MEMBER.label),
@@ -229,9 +250,7 @@ class ProjectMembershipRoleForm(forms.ModelForm):
         model = ProjectMembership
         fields = ['role']
         widgets = {
-            'role': forms.Select(
-                attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}
-            ),
+            'role': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
         }
         labels = {'role': 'Роль'}
 
@@ -248,7 +267,11 @@ class CommentForm(forms.ModelForm):
         model = Comment
         fields = ['text']
         widgets = {
-            'text': forms.Textarea(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'rows': 3, 'placeholder': 'Написать комментарий...'}),
+            'text': forms.Textarea(attrs={
+                'class': FORM_CONTROL_CLASS,
+                'rows': 3,
+                'placeholder': 'Написать комментарий…',
+            }),
         }
         labels = {
             'text': 'Комментарий',
@@ -259,7 +282,7 @@ class StageForm(forms.ModelForm):
     deadline = forms.DateField(
         required=False,
         label='Дедлайн',
-        widget=forms.DateInput(attrs={'type': 'date', 'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+        widget=forms.DateInput(attrs={'type': 'date', 'class': FORM_CONTROL_CLASS}),
     )
 
     class Meta:
@@ -271,9 +294,11 @@ class StageForm(forms.ModelForm):
             'status': 'Статус',
         }
         widgets = {
-            'name': forms.TextInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2', 'placeholder': 'Название этапа'}),
-            'order': forms.NumberInput(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
-            'status': forms.Select(attrs={'class': 'w-full rounded-md border border-gray-300 px-3 py-2'}),
+            'name': forms.TextInput(
+                attrs={'class': FORM_CONTROL_CLASS, 'placeholder': 'Название этапа'}
+            ),
+            'order': forms.NumberInput(attrs={'class': FORM_CONTROL_CLASS}),
+            'status': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
         }
 
     def _post_clean(self):
@@ -296,7 +321,11 @@ class InviteCodeCreateForm(forms.ModelForm):
             'expires_at': 'Действует до',
         }
         widgets = {
-            'expires_at': forms.DateTimeInput(attrs={'type': 'datetime-local'}),
+            'project': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'project_role': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
+            'expires_at': forms.DateTimeInput(
+                attrs={'type': 'datetime-local', 'class': FORM_CONTROL_CLASS}
+            ),
         }
 
     def __init__(self, *args, user=None, **kwargs):
@@ -343,6 +372,7 @@ class ProjectOwnershipTransferForm(forms.Form):
     new_owner = forms.ModelChoiceField(
         queryset=TelegramUser.objects.none(),
         label='Новый владелец',
+        widget=forms.Select(attrs=CUSTOM_SELECT_ATTRS),
     )
     confirmation = forms.CharField(label='Подтверждение')
 

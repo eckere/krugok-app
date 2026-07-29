@@ -58,6 +58,8 @@ class TelegramUser(AbstractUser):
 
     @property
     def display_name(self):
+        if self.anonymized_at:
+            return 'Удалённый пользователь'
         return self.get_full_name() or self.username
 
     @property
@@ -74,10 +76,14 @@ class TelegramUser(AbstractUser):
         self.email = ''
         self.photo_url = None
         self.is_active = False
+        self.is_staff = False
+        self.is_superuser = False
         self.is_verified = False
         self.anonymized_at = timezone.now()
         self.set_unusable_password()
         self.save()
+        self.groups.clear()
+        self.user_permissions.clear()
 
 
 class InviteCode(models.Model):

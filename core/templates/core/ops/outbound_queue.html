@@ -11,6 +11,7 @@
       <p class="page-header__subtitle">Релиз: <code>{{ release_sha }}</code></p>
     </div>
     <div class="page-header__actions">
+      <a href="{% url 'user_list' %}" class="btn btn-secondary">Пользователи</a>
       <a href="{% url 'operational_status' %}" class="btn btn-secondary">JSON-статус</a>
       <a href="{% url 'profile_settings' %}" class="btn btn-secondary">В профиль</a>
     </div>

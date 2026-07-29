@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+
+{% block title %}Пользователи — КружокAPP{% endblock %}
+
+{% block content %}
+<div class="app-content">
+  <header class="page-header">
+    <div>
+      <div class="page-header__eyebrow">Администрирование</div>
+      <h1 class="page-header__title">Пользователи</h1>
+      <p class="page-header__subtitle">Участники приложения, их доступ и проектная нагрузка</p>
+    </div>
+    <div class="page-header__actions">
+      <a href="{% url 'invite_list' %}" class="btn btn-primary">Пригласить пользователя</a>
+      <a href="{% url 'outbound_queue' %}" class="btn btn-secondary">Состояние системы</a>
+    </div>
+  </header>
+
+  {% if removed %}
+    <div class="notice notice--success" role="status">
+      Пользователь удалён: доступ отозван, персональные данные обезличены.
+    </div>
+  {% endif %}
+
+  <section class="stats-grid user-stats" aria-label="Статистика пользователей">
+    <article class="stat-card">
+      <div class="stat-card__label">Всего</div>
+      <div class="stat-card__value">{{ user_stats.total }}</div>
+    </article>
+    <article class="stat-card">
+      <div class="stat-card__label">Активны</div>
+      <div class="stat-card__value">{{ user_stats.active }}</div>
+    </article>
+    <article class="stat-card">
+      <div class="stat-card__label">Удалены</div>
+      <div class="stat-card__value">{{ user_stats.deleted }}</div>
+    </article>
+    <article class="stat-card">
+      <div class="stat-card__label">Глобальные админы</div>
+      <div class="stat-card__value">{{ user_stats.admins }}</div>
+    </article>
+  </section>
+
+  <section class="panel">
+    {% include 'core/users/list_items.html' %}
+  </section>
+</div>
+{% endblock %}

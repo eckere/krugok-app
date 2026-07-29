@@ -436,6 +436,178 @@ class OperationalStatusTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
 
+@override_settings(TELEGRAM_ADMIN_IDS=frozenset({777, 888}))
+class AdminUserManagementTests(TestCase):
+    def setUp(self):
+        self.admin = get_user_model().objects.create_user(
+            username='users_admin',
+            first_name='Администратор',
+            telegram_id=777,
+            is_verified=True,
+        )
+        self.target = get_user_model().objects.create_user(
+            username='managed_user',
+            first_name='Мария',
+            telegram_username='managed_public',
+            telegram_id=12345,
+            is_verified=True,
+        )
+
+    def test_only_global_admin_can_open_user_list(self):
+        self.client.force_login(self.target)
+        denied = self.client.get(reverse('user_list'))
+        self.client.force_login(self.admin)
+        allowed = self.client.get(reverse('user_list'))
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertContains(allowed, 'Мария')
+        self.assertContains(allowed, 'Telegram ID: 12345')
+        self.assertContains(allowed, 'Пригласить пользователя')
+        self.assertContains(allowed, 'user-card')
+
+    def test_user_list_searches_and_filters_deleted_accounts(self):
+        deleted = get_user_model().objects.create_user(
+            username='old_user',
+            first_name='Старый',
+            is_verified=True,
+        )
+        deleted.anonymize()
+        self.client.force_login(self.admin)
+
+        active_search = self.client.get(
+            reverse('user_list'),
+            {'filter': 'active', 'q': 'managed_public'},
+        )
+        deleted_list = self.client.get(
+            reverse('user_list'),
+            {'filter': 'deleted'},
+        )
+
+        self.assertContains(active_search, 'Мария')
+        self.assertContains(active_search, 'Найдено пользователей: 1')
+        self.assertNotContains(
+            active_search,
+            f'id="user-card-{self.admin.pk}"',
+        )
+        self.assertContains(
+            deleted_list,
+            f'Удалённый пользователь #{deleted.pk}',
+        )
+        self.assertNotContains(deleted_list, 'Мария')
+
+    def test_admin_removal_revokes_access_and_preserves_history(self):
+        project = Project.objects.create(name='Shared', owner=self.admin)
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.admin,
+            role=ProjectMembership.Role.OWNER,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.target,
+            role=ProjectMembership.Role.MEMBER,
+        )
+        task = Task.objects.create(
+            title='Assigned',
+            creator=self.admin,
+            assignee=self.target,
+            project=project,
+        )
+        discussion = Discussion.objects.create(
+            title='User removal',
+            created_by=self.admin,
+        )
+        discussion.participants.add(self.admin, self.target)
+        outbound = OutboundMessage.objects.create(
+            recipient=self.target,
+            kind=Notification.Kind.MESSAGE_ADDED,
+            dedupe_key='user-removal',
+            text='Pending',
+            status=OutboundMessage.Status.PENDING,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse('user_remove', args=[self.target.pk]),
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers['HX-Redirect'],
+            f"{reverse('user_list')}?removed=1",
+        )
+        self.target.refresh_from_db()
+        task.refresh_from_db()
+        outbound.refresh_from_db()
+        self.assertFalse(self.target.is_active)
+        self.assertFalse(self.target.is_verified)
+        self.assertIsNone(self.target.telegram_id)
+        self.assertEqual(self.target.display_name, 'Удалённый пользователь')
+        self.assertIsNone(task.assignee)
+        self.assertFalse(
+            ProjectMembership.objects.filter(
+                project=project,
+                user=self.target,
+            ).exists()
+        )
+        self.assertFalse(
+            discussion.participants.filter(pk=self.target.pk).exists()
+        )
+        self.assertEqual(outbound.status, OutboundMessage.Status.CANCELLED)
+        self.assertTrue(
+            AuditLog.objects.filter(
+                actor=self.admin,
+                action='user.remove',
+                entity_id=str(self.target.pk),
+            ).exists()
+        )
+        self.assertTrue(Task.objects.filter(pk=task.pk).exists())
+        self.assertTrue(Discussion.objects.filter(pk=discussion.pk).exists())
+
+    def test_admin_cannot_remove_self_or_another_global_admin(self):
+        other_admin = get_user_model().objects.create_user(
+            username='other_global_admin',
+            telegram_id=888,
+            is_verified=True,
+        )
+        self.client.force_login(self.admin)
+
+        self_response = self.client.post(
+            reverse('user_remove', args=[self.admin.pk])
+        )
+        admin_response = self.client.post(
+            reverse('user_remove', args=[other_admin.pk])
+        )
+
+        self.assertEqual(self_response.status_code, 403)
+        self.assertEqual(admin_response.status_code, 403)
+        self.admin.refresh_from_db()
+        other_admin.refresh_from_db()
+        self.assertTrue(self.admin.is_active)
+        self.assertTrue(other_admin.is_active)
+
+    def test_project_owner_must_transfer_or_archive_active_projects(self):
+        project = Project.objects.create(
+            name='Owned by target',
+            owner=self.target,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.target,
+            role=ProjectMembership.Role.OWNER,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse('user_remove', args=[self.target.pk])
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.target.refresh_from_db()
+        self.assertTrue(self.target.is_active)
+
+
 class ThemeAndListUxTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

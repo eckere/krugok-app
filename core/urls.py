@@ -23,6 +23,7 @@ urlpatterns = [
     path('invites/<int:invite_id>/revoke/', views.invite_revoke, name='invite_revoke'),
     path('users/', views.user_list, name='user_list'),
     path('users/<int:user_id>/remove/', views.user_remove, name='user_remove'),
+    path('users/<int:user_id>/purge/', views.user_purge, name='user_purge'),
     path('users/<int:user_id>/', views.profile_detail, name='profile_detail'),
     path('account/settings/', views.profile_settings, name='profile_settings'),
     path('account/logout/', views.account_logout, name='account_logout'),

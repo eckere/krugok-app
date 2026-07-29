@@ -79,7 +79,8 @@
         </div>
       </section>
 
-      {% if archived_stages and project|can_admin_project:user %}
+      {% if archived_stages %}
+      {% if project|can_admin_project:user or project|can_delete_project:user %}
       <section class="panel">
         <div class="panel__header">
           <div>
@@ -91,11 +92,13 @@
           {% for archived_stage in archived_stages %}
             <div class="member-row">
               <span class="member-row__name">{{ archived_stage.name }}</span>
+              {% if project|can_admin_project:user %}
               <form method="post" action="{% url 'stage_restore' archived_stage.id %}">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-secondary btn-sm">Восстановить</button>
               </form>
-              {% if project|can_own_project:user %}
+              {% endif %}
+              {% if project|can_delete_project:user %}
                 <button type="button"
                         hx-delete="{% url 'stage_delete' archived_stage.id %}"
                         hx-target="closest .member-row"
@@ -109,6 +112,7 @@
           {% endfor %}
         </div>
       </section>
+      {% endif %}
       {% endif %}
     </main>
 

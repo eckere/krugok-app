@@ -52,6 +52,7 @@ from .models import (
     TelegramUser,
 )
 from .permissions import (
+    can_delete_project,
     can_view_profile,
     get_accessible_projects,
     get_accessible_tasks,
@@ -105,6 +106,7 @@ def _with_project_summary(projects):
         ),
         summary_member_count=models.Count(
             'project_memberships',
+            filter=models.Q(project_memberships__user__is_active=True),
             distinct=True,
         ),
         summary_next_deadline=models.Min(
@@ -589,9 +591,9 @@ def invite_revoke(request, invite_id):
 
 @app_admin_required
 def user_list(request):
-    filter_value = request.GET.get('filter', 'all')
+    filter_value = request.GET.get('filter', 'active')
     if filter_value not in {'all', 'active', 'deleted'}:
-        filter_value = 'all'
+        filter_value = 'active'
     query = request.GET.get('q', '').strip()
 
     users = TelegramUser.objects.annotate(
@@ -602,6 +604,10 @@ def user_list(request):
         ),
         project_membership_count=models.Count(
             'project_memberships',
+            distinct=True,
+        ),
+        owned_project_count=models.Count(
+            'owned_projects',
             distinct=True,
         ),
     )
@@ -636,6 +642,11 @@ def user_list(request):
             and not listed_user.is_current_admin
             and listed_user.active_owned_project_count == 0
         )
+        listed_user.can_be_purged = bool(
+            not listed_user.is_active
+            and listed_user.anonymized_at is not None
+            and listed_user.owned_project_count == 0
+        )
 
     admin_filter = (
         models.Q(is_superuser=True)
@@ -646,6 +657,7 @@ def user_list(request):
         'filter': filter_value,
         'query': query,
         'removed': request.GET.get('removed') == '1',
+        'purged': request.GET.get('purged') == '1',
         'user_stats': {
             'total': TelegramUser.objects.count(),
             'active': TelegramUser.objects.filter(is_active=True).count(),
@@ -700,7 +712,37 @@ def user_remove(request, user_id):
             changes={'user_id': target.pk},
         )
         target.anonymize()
-    redirect_url = f"{reverse('user_list')}?removed=1"
+    redirect_url = f"{reverse('user_list')}?filter=active&removed=1"
+    if request.htmx:
+        return HttpResponse(headers={'HX-Redirect': redirect_url})
+    return redirect(redirect_url)
+
+
+@app_admin_required
+@require_POST
+def user_purge(request, user_id):
+    with transaction.atomic():
+        target = get_object_or_404(
+            TelegramUser.objects.select_for_update(),
+            pk=user_id,
+            is_active=False,
+            anonymized_at__isnull=False,
+        )
+        if target.owned_projects.exists():
+            return HttpResponse(
+                'Сначала удалите архивные проекты этого пользователя.',
+                status=409,
+            )
+
+        record_audit(
+            request,
+            'user.purge',
+            target,
+            changes={'user_id': target.pk},
+        )
+        target.delete()
+
+    redirect_url = f"{reverse('user_list')}?filter=deleted&purged=1"
     if request.htmx:
         return HttpResponse(headers={'HX-Redirect': redirect_url})
     return redirect(redirect_url)
@@ -1183,7 +1225,7 @@ def project_detail(request, project_id):
     )
     memberships = project.project_memberships.select_related('user').order_by(
         'role', 'user__first_name', 'user__username'
-    )
+    ).filter(user__is_active=True)
     archived_stages = project.stages.filter(is_archived=True).order_by(
         '-updated_at'
     )
@@ -1286,7 +1328,7 @@ def project_update(request, project_id):
 @require_http_methods(['DELETE'])
 def project_delete(request, project_id):
     project = get_object_or_404(Project, pk=project_id)
-    if not (request.user.is_superuser or project.is_owner(request.user)):
+    if not can_delete_project(project, request.user):
         raise PermissionDenied
     if not project.is_archived:
         return HttpResponse(
@@ -1578,7 +1620,7 @@ def stage_delete(request, stage_id):
         pk=stage_id,
         is_archived=True,
     )
-    if not (request.user.is_superuser or stage.project.is_owner(request.user)):
+    if not can_delete_project(stage.project, request.user):
         raise PermissionDenied
     record_audit(request, 'stage.delete', stage)
     stage.delete()

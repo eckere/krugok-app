@@ -149,7 +149,11 @@ def enqueue_outbound(
 def notify(task: Task, kind: str) -> Notification | None:
     """Только фиксирует доставку; сетевой вызов выполняет worker."""
     recipient = task.assignee or task.creator
-    if recipient.telegram_id is None or not _recipient_allows(recipient, kind):
+    if (
+        recipient is None
+        or recipient.telegram_id is None
+        or not _recipient_allows(recipient, kind)
+    ):
         return None
     notification, created = Notification.objects.get_or_create(
         task=task,

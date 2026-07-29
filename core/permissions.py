@@ -20,7 +20,7 @@ def get_accessible_projects(user, *, include_archived: bool = False) -> QuerySet
 
 
 def get_accessible_tasks(user) -> QuerySet[Task]:
-    if user.is_superuser:
+    if is_app_admin(user):
         return Task.objects.all()
     return Task.objects.filter(
         Q(project__in=get_accessible_projects(user))
@@ -67,7 +67,7 @@ def can_manage_project(project: Project, user) -> bool:
 
 
 def can_delete_project(project: Project, user) -> bool:
-    return user.is_superuser or project.is_owner(user)
+    return is_app_admin(user) or project.is_owner(user)
 
 
 def can_edit_task(task: Task, user) -> bool:

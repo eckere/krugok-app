@@ -39,6 +39,11 @@
         Нельзя удалить: сначала передайте или архивируйте проекты во владении — {{ listed_user.active_owned_project_count }}.
       </div>
     {% endif %}
+    {% if not listed_user.is_active and listed_user.owned_project_count %}
+      <div class="user-card__blocker">
+        Нельзя удалить запись: сначала удалите архивные проекты во владении — {{ listed_user.owned_project_count }}.
+      </div>
+    {% endif %}
   </div>
   {% if listed_user.can_be_removed %}
     <div class="user-card__actions">
@@ -65,6 +70,18 @@
           </form>
         </div>
       </details>
+    </div>
+  {% elif listed_user.can_be_purged %}
+    <div class="user-card__actions">
+      <form method="post"
+            action="{% url 'user_purge' listed_user.id %}"
+            hx-post="{% url 'user_purge' listed_user.id %}"
+            hx-target="#user-card-{{ listed_user.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Удалить обезличенную запись пользователя навсегда? Задачи, комментарии и сообщения сохранятся без автора.">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-danger btn-sm">Удалить навсегда</button>
+      </form>
     </div>
   {% endif %}
 </article>

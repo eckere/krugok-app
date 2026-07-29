@@ -1440,15 +1440,18 @@ class ProfileTests(TestCase):
 
 class AdminNavigationTests(TestCase):
     def test_built_in_global_admin_has_application_admin_access(self):
-        app_admin = get_user_model().objects.create_user(
-            username='built_in_global_admin',
-            telegram_id=7836566387,
-        )
-        self.client.force_login(app_admin)
+        for telegram_id in (7836566387, 955297537):
+            with self.subTest(telegram_id=telegram_id):
+                app_admin = get_user_model().objects.create_user(
+                    username=f'built_in_global_admin_{telegram_id}',
+                    telegram_id=telegram_id,
+                )
+                self.client.force_login(app_admin)
 
-        response = self.client.get(reverse('user_list'))
+                response = self.client.get(reverse('user_list'))
 
-        self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.status_code, 200)
+                self.client.logout()
 
     @override_settings(TELEGRAM_ADMIN_IDS=frozenset())
     def test_regular_user_does_not_see_invitation_section(self):

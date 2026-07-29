@@ -38,7 +38,7 @@
               </div>
               <div class="discussion-link__preview">
                 {% if discussion.messages.last %}
-                  {{ discussion.messages.last.sender.display_name }}: {{ discussion.messages.last.text|truncatechars:90 }}
+                  {% if discussion.messages.last.sender %}{{ discussion.messages.last.sender.display_name }}{% else %}Удалённый пользователь{% endif %}: {{ discussion.messages.last.text|truncatechars:90 }}
                 {% else %}
                   Сообщений пока нет
                 {% endif %}

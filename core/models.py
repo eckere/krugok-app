@@ -314,7 +314,8 @@ class Task(models.Model):
     )
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='created_tasks',
     )
     assignee = models.ForeignKey(
@@ -499,7 +500,8 @@ class Comment(models.Model):
     )
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
     )
     text = models.TextField(validators=[MinLengthValidator(1)])
     created_at = models.DateTimeField(auto_now_add=True)
@@ -522,7 +524,8 @@ class Discussion(models.Model):
     )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
         related_name='created_discussions',
     )
     participants = models.ManyToManyField(
@@ -547,7 +550,8 @@ class Message(models.Model):
     )
     sender = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
+        null=True,
     )
     text = models.TextField(validators=[MinLengthValidator(1)])
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

@@ -1,4 +1,5 @@
 <article id="comment-{{ comment.id }}" class="comment">
+  {% if comment.author %}
   <a href="{% url 'profile_detail' comment.author.id %}" aria-label="Профиль {{ comment.author.display_name }}">
     {% if comment.author.photo_url %}
       <img class="comment__avatar" src="{{ comment.author.photo_url }}" alt="">
@@ -6,9 +7,16 @@
       <span class="comment__avatar">{{ comment.author.first_name|default:comment.author.username|first|upper }}</span>
     {% endif %}
   </a>
+  {% else %}
+    <span class="comment__avatar" aria-hidden="true">×</span>
+  {% endif %}
   <div class="comment__content">
     <div class="comment__header">
+      {% if comment.author %}
       <a href="{% url 'profile_detail' comment.author.id %}"><strong>{{ comment.author.display_name }}</strong></a>
+      {% else %}
+      <strong>Удалённый пользователь</strong>
+      {% endif %}
       <time>{{ comment.created_at|date:'d.m.Y, H:i' }}</time>
     </div>
     <div class="comment__text">{{ comment.text|linebreaksbr }}</div>

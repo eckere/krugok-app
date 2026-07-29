@@ -1,4 +1,5 @@
 <article id="message-{{ message.id }}" data-message-id="{{ message.id }}" class="message {% if message.sender == request.user %}message--mine{% endif %}">
+  {% if message.sender %}
   <a href="{% url 'profile_detail' message.sender.id %}" aria-label="Профиль {{ message.sender.display_name }}">
     {% if message.sender.photo_url %}
       <img class="message__avatar" src="{{ message.sender.photo_url }}" alt="">
@@ -6,10 +7,17 @@
       <span class="message__avatar">{{ message.sender.first_name|default:message.sender.username|first|upper }}</span>
     {% endif %}
   </a>
+  {% else %}
+    <span class="message__avatar" aria-hidden="true">×</span>
+  {% endif %}
   <div class="message__body">
     <div class="message__bubble">{{ message.text|linebreaksbr }}</div>
     <div class="message__meta">
-      <a href="{% url 'profile_detail' message.sender.id %}">{{ message.sender.display_name }}</a>,
+      {% if message.sender %}
+        <a href="{% url 'profile_detail' message.sender.id %}">{{ message.sender.display_name }}</a>,
+      {% else %}
+        Удалённый пользователь,
+      {% endif %}
       {{ message.created_at|date:"H:i" }}
       {% if message.edited_at %}· изменено{% endif %}
     </div>

@@ -48,7 +48,7 @@
         <button type="submit" class="btn btn-secondary btn-sm">Восстановить</button>
       </form>
       {% endif %}
-      {% if project.is_archived and project|can_own_project:user %}
+      {% if project.is_archived and project|can_delete_project:user %}
       <button type="button" hx-delete="{% url 'project_delete' project.id %}" hx-target="#project-{{ project.id }}" hx-swap="outerHTML" hx-confirm="Удалить архивный проект «{{ project.name }}» навсегда? Это действие необратимо." class="btn btn-danger btn-sm">Удалить навсегда</button>
       {% endif %}
       </div>
@@ -69,7 +69,7 @@
             {% csrf_token %}
             <button type="submit" class="entity-actions-menu__item">Восстановить</button>
           </form>
-          {% if project|can_own_project:user %}
+          {% if project|can_delete_project:user %}
           <button type="button"
                   hx-delete="{% url 'project_delete' project.id %}"
                   hx-target="#project-{{ project.id }}"
@@ -78,6 +78,18 @@
                   class="entity-actions-menu__item entity-actions-menu__item--danger">Удалить навсегда</button>
           {% endif %}
           {% endif %}
+        </div>
+      </details>
+      {% elif project.is_archived and project|can_delete_project:user %}
+      <details class="entity-actions-menu">
+        <summary aria-label="Действия с проектом {{ project.name }}" title="Действия">•••</summary>
+        <div class="entity-actions-menu__popover">
+          <button type="button"
+                  hx-delete="{% url 'project_delete' project.id %}"
+                  hx-target="#project-{{ project.id }}"
+                  hx-swap="outerHTML"
+                  hx-confirm="Удалить архивный проект «{{ project.name }}» навсегда? Это действие необратимо."
+                  class="entity-actions-menu__item entity-actions-menu__item--danger">Удалить навсегда</button>
         </div>
       </details>
       {% endif %}

@@ -21,6 +21,11 @@
       Пользователь удалён: доступ отозван, персональные данные обезличены.
     </div>
   {% endif %}
+  {% if purged %}
+    <div class="notice notice--success" role="status">
+      Обезличенная запись удалена навсегда. История работы сохранена.
+    </div>
+  {% endif %}
 
   <section class="stats-grid user-stats" aria-label="Статистика пользователей">
     <article class="stat-card">

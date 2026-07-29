@@ -11,6 +11,7 @@ from django.utils import timezone
 from .access import redeem_invite_code
 from .models import (
     AuditLog,
+    Comment,
     Discussion,
     InviteCode,
     Message,
@@ -201,6 +202,70 @@ class ArchiveAndOrderingTests(TestCase):
         self.assertEqual(forbidden.status_code, 403)
         self.assertEqual(deleted.status_code, 200)
         self.assertFalse(Project.objects.filter(pk=self.project.pk).exists())
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({999}))
+    def test_global_admin_can_delete_archived_project_and_stage(self):
+        global_admin = get_user_model().objects.create_user(
+            username='global_archive_admin',
+            telegram_id=999,
+            is_verified=True,
+        )
+        archived_project = Project.objects.create(
+            name='Orphaned archive',
+            owner=self.owner,
+            is_archived=True,
+        )
+        archived_stage = Stage.objects.create(
+            project=self.project,
+            name='Archived stage',
+            is_archived=True,
+        )
+        self.client.force_login(global_admin)
+
+        archive_page = self.client.get(
+            reverse('project_list'),
+            {'filter': 'archived'},
+        )
+        project_page = self.client.get(
+            reverse('project_detail', args=[self.project.pk])
+        )
+        stage_response = self.client.delete(
+            reverse('stage_delete', args=[archived_stage.pk])
+        )
+        project_response = self.client.delete(
+            reverse('project_delete', args=[archived_project.pk])
+        )
+
+        self.assertContains(
+            archive_page,
+            reverse('project_delete', args=[archived_project.pk]),
+        )
+        self.assertContains(
+            project_page,
+            reverse('stage_delete', args=[archived_stage.pk]),
+        )
+        self.assertEqual(stage_response.status_code, 200)
+        self.assertEqual(project_response.status_code, 200)
+        self.assertFalse(Stage.objects.filter(pk=archived_stage.pk).exists())
+        self.assertFalse(
+            Project.objects.filter(pk=archived_project.pk).exists()
+        )
+
+    @override_settings(TELEGRAM_ADMIN_IDS=frozenset({999}))
+    def test_global_admin_still_cannot_delete_active_project(self):
+        global_admin = get_user_model().objects.create_user(
+            username='safe_global_archive_admin',
+            telegram_id=999,
+            is_verified=True,
+        )
+        self.client.force_login(global_admin)
+
+        response = self.client.delete(
+            reverse('project_delete', args=[self.project.pk])
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Project.objects.filter(pk=self.project.pk).exists())
 
 
 class DurableNotificationTests(TestCase):
@@ -535,7 +600,7 @@ class AdminUserManagementTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.headers['HX-Redirect'],
-            f"{reverse('user_list')}?removed=1",
+            f"{reverse('user_list')}?filter=active&removed=1",
         )
         self.target.refresh_from_db()
         task.refresh_from_db()
@@ -564,6 +629,90 @@ class AdminUserManagementTests(TestCase):
         )
         self.assertTrue(Task.objects.filter(pk=task.pk).exists())
         self.assertTrue(Discussion.objects.filter(pk=discussion.pk).exists())
+
+    def test_admin_can_purge_anonymized_user_without_deleting_history(self):
+        project = Project.objects.create(
+            name='Historical project',
+            owner=self.admin,
+        )
+        ProjectMembership.objects.create(
+            project=project,
+            user=self.admin,
+            role=ProjectMembership.Role.OWNER,
+        )
+        task = Task.objects.create(
+            title='Historical task',
+            creator=self.target,
+            project=project,
+        )
+        comment = Comment.objects.create(
+            task=task,
+            author=self.target,
+            text='Historical comment',
+        )
+        discussion = Discussion.objects.create(
+            title='Historical discussion',
+            created_by=self.target,
+        )
+        message = Message.objects.create(
+            discussion=discussion,
+            sender=self.target,
+            text='Historical message',
+        )
+        target_id = self.target.pk
+        self.target.anonymize()
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse('user_purge', args=[target_id]),
+            HTTP_HX_REQUEST='true',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers['HX-Redirect'],
+            f"{reverse('user_list')}?filter=deleted&purged=1",
+        )
+        self.assertFalse(
+            get_user_model().objects.filter(pk=target_id).exists()
+        )
+        task.refresh_from_db()
+        comment.refresh_from_db()
+        discussion.refresh_from_db()
+        message.refresh_from_db()
+        self.assertIsNone(task.creator)
+        self.assertIsNone(comment.author)
+        self.assertIsNone(discussion.created_by)
+        self.assertIsNone(message.sender)
+        self.assertContains(
+            self.client.get(reverse('task_detail', args=[task.pk])),
+            'Удалённый пользователь',
+        )
+        self.assertContains(
+            self.client.get(
+                reverse('discussion_detail', args=[discussion.pk])
+            ),
+            'Удалённый пользователь',
+        )
+
+    def test_purge_requires_owned_projects_to_be_deleted_first(self):
+        project = Project.objects.create(
+            name='Archived owned project',
+            owner=self.target,
+            is_archived=True,
+        )
+        self.target.anonymize()
+        self.client.force_login(self.admin)
+
+        response = self.client.post(
+            reverse('user_purge', args=[self.target.pk])
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(
+            get_user_model().objects.filter(pk=self.target.pk).exists()
+        )
+        self.assertTrue(Project.objects.filter(pk=project.pk).exists())
 
     def test_admin_cannot_remove_self_or_another_global_admin(self):
         other_admin = get_user_model().objects.create_user(

@@ -3,9 +3,11 @@ from django import template
 from core.access import is_app_admin
 from core.permissions import (
     can_change_task_status,
-    can_delete_project,
     can_edit_task,
     can_manage_project,
+)
+from core.permissions import (
+    can_delete_project as user_can_delete_project,
 )
 
 register = template.Library()
@@ -18,7 +20,12 @@ def can_admin_project(project, user) -> bool:
 
 @register.filter
 def can_own_project(project, user) -> bool:
-    return can_delete_project(project, user)
+    return user.is_superuser or project.is_owner(user)
+
+
+@register.filter
+def can_delete_project(project, user) -> bool:
+    return user_can_delete_project(project, user)
 
 
 @register.filter

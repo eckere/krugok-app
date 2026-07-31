@@ -114,7 +114,7 @@
         <p class="auth-copy">Задачи, проекты и командные обсуждения в одном месте.</p>
         {% if telegram_login_enabled %}
             <div id="telegram-login-widget" aria-label="Войти через Telegram"></div>
-            <p id="telegram-browser-auth-error" class="form-error" hidden>
+            <p id="telegram-browser-auth-error" class="form-error"{% if not telegram_browser_auth_error %} hidden{% endif %}>
                 Не удалось войти через Telegram. Попробуйте ещё раз.
             </p>
         {% else %}

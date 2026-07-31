@@ -3,7 +3,9 @@ core/views.py
 """
 import json
 import logging
+import secrets
 from datetime import datetime, time, timedelta
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
@@ -339,6 +341,28 @@ def index(request):
                 'discussion_count': discussions.count(),
             }
         )
+    elif settings.TELEGRAM_BOT_USERNAME:
+        # The legacy Telegram widget can redirect signed data to our backend.
+        # Keep a few one-time states so login remains usable in multiple tabs
+        # without weakening the main page CSP with ``unsafe-eval``.
+        login_state = secrets.token_urlsafe(32)
+        login_states = request.session.get('telegram_login_states', [])
+        login_states = [
+            state for state in login_states if isinstance(state, str)
+        ][-3:]
+        login_states.append(login_state)
+        request.session['telegram_login_states'] = login_states
+        callback_url = request.build_absolute_uri(reverse('auth_telegram_widget'))
+        context.update(
+            {
+                'telegram_widget_auth_url': (
+                    f'{callback_url}?{urlencode({"state": login_state})}'
+                ),
+                'telegram_browser_auth_error': (
+                    request.GET.get('telegram_auth') == 'error'
+                ),
+            }
+        )
     return render(request, 'core/index.html', context)
 
 
@@ -422,26 +446,55 @@ def auth_telegram(request):
     return _telegram_login_response(reverse('index'))
 
 
-@require_POST
+@require_http_methods(['GET', 'POST'])
 def auth_telegram_widget(request):
     """Принимает подписанный ответ Telegram Login Widget из обычного браузера."""
     if not allow_request(
         request, 'telegram-widget-auth', limit=30, window_seconds=5 * 60
     ):
         return JsonResponse({'error': 'Слишком много попыток'}, status=429)
-    try:
-        payload = json.loads(request.body or '{}')
-    except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
-        payload = {}
 
-    auth_data = payload.get('auth_data', {}) if isinstance(payload, dict) else {}
+    if request.method == 'GET':
+        received_state = request.GET.get('state', '')
+        login_states = request.session.get('telegram_login_states', [])
+        login_states = [
+            state for state in login_states if isinstance(state, str)
+        ]
+        state_is_valid = bool(received_state) and any(
+            secrets.compare_digest(received_state, state)
+            for state in login_states
+        )
+        if not state_is_valid:
+            logger.warning('Отклонён Telegram Login Widget с неверным state')
+            return redirect(f'{reverse("index")}?telegram_auth=error')
+        request.session['telegram_login_states'] = [
+            state
+            for state in login_states
+            if not secrets.compare_digest(received_state, state)
+        ]
+        auth_data = {
+            key: value
+            for key, value in request.GET.items()
+            if key != 'state'
+        }
+    else:
+        try:
+            payload = json.loads(request.body or '{}')
+        except (json.JSONDecodeError, TypeError, UnicodeDecodeError):
+            payload = {}
+        auth_data = payload.get('auth_data', {}) if isinstance(payload, dict) else {}
+
     try:
         tg_user = validate_login_widget_data(auth_data)
     except LoginWidgetValidationError as exc:
         logger.warning('Отклонена попытка входа через Telegram Login Widget: %s', exc)
+        if request.method == 'GET':
+            return redirect(f'{reverse("index")}?telegram_auth=error')
         return JsonResponse({'error': 'Не удалось войти'}, status=401)
 
     _login_telegram_user(request, tg_user)
+    if request.method == 'GET':
+        return redirect('index')
     return _telegram_login_response()
 
 

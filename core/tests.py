@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -249,6 +250,68 @@ class TelegramAuthenticationTests(TestCase):
         self.assertEqual(user.username, 'tg_765432198')
         self.assertEqual(user.telegram_username, 'widget_user')
         self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
+
+    @override_settings(TELEGRAM_BOT_USERNAME='tempo_test_bot')
+    def test_login_widget_uses_redirect_callback_without_unsafe_eval(self):
+        response = self.client.get(reverse('index'))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("script.setAttribute('data-auth-url'", content)
+        self.assertNotIn("script.setAttribute('data-onauth'", content)
+        callback_url = response.context['telegram_widget_auth_url']
+        parsed_url = urlsplit(callback_url)
+        state = parse_qs(parsed_url.query)['state'][0]
+        self.assertEqual(parsed_url.path, reverse('auth_telegram_widget'))
+        self.assertIn(state, self.client.session['telegram_login_states'])
+
+    @override_settings(TELEGRAM_BOT_USERNAME='tempo_test_bot')
+    @patch('core.views.validate_login_widget_data')
+    def test_login_widget_redirect_logs_in_with_one_time_state(
+        self, validate_login_widget_data
+    ):
+        validate_login_widget_data.return_value = {
+            'id': 765432199,
+            'username': 'redirect_user',
+            'first_name': 'Мария',
+        }
+        index_response = self.client.get(reverse('index'))
+        callback_url = index_response.context['telegram_widget_auth_url']
+        state = parse_qs(urlsplit(callback_url).query)['state'][0]
+
+        response = self.client.get(
+            reverse('auth_telegram_widget'),
+            {
+                'state': state,
+                'id': '765432199',
+                'auth_date': '1234567890',
+                'hash': 'signed-by-telegram',
+            },
+        )
+
+        self.assertRedirects(response, reverse('index'), fetch_redirect_response=False)
+        auth_data = validate_login_widget_data.call_args.args[0]
+        self.assertNotIn('state', auth_data)
+        self.assertEqual(auth_data['id'], '765432199')
+        user = get_user_model().objects.get(telegram_id=765432199)
+        self.assertEqual(int(self.client.session['_auth_user_id']), user.id)
+        self.assertNotIn(state, self.client.session['telegram_login_states'])
+
+    @patch('core.views.validate_login_widget_data')
+    def test_login_widget_redirect_rejects_missing_state(
+        self, validate_login_widget_data
+    ):
+        response = self.client.get(
+            reverse('auth_telegram_widget'),
+            {'id': '765432199', 'hash': 'signed-by-telegram'},
+        )
+
+        self.assertEqual(
+            response.url,
+            f'{reverse("index")}?telegram_auth=error',
+        )
+        validate_login_widget_data.assert_not_called()
+        self.assertNotIn('_auth_user_id', self.client.session)
 
     @patch('core.views.validate_login_widget_data')
     def test_invalid_login_widget_data_returns_401(self, validate_login_widget_data):

@@ -358,33 +358,6 @@
                 });
         })();
 
-        window.onTelegramLogin = function (authData) {
-            var error = document.getElementById('telegram-browser-auth-error');
-            if (error) error.hidden = true;
-
-            fetch('{% url "auth_telegram_widget" %}', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': '{{ csrf_token }}'
-                },
-                body: JSON.stringify({auth_data: authData})
-            })
-                .then(function (response) {
-                    return response.json().catch(function () { return {}; }).then(function (payload) {
-                        return {ok: response.ok, payload: payload};
-                    });
-                })
-                .then(function (result) {
-                    if (!result.ok || !result.payload.success) throw new Error('Telegram widget authentication failed');
-                    window.location.assign(result.payload.redirect_url || window.location.href);
-                })
-                .catch(function () {
-                    if (error) error.hidden = false;
-                });
-        };
-
         (function () {
             var container = document.getElementById('telegram-login-widget');
             if (!container) return;
@@ -396,7 +369,7 @@
             script.setAttribute('data-telegram-login', '{{ telegram_bot_username|escapejs }}');
             script.setAttribute('data-size', 'large');
             script.setAttribute('data-radius', '8');
-            script.setAttribute('data-onauth', 'onTelegramLogin(user)');
+            script.setAttribute('data-auth-url', '{{ telegram_widget_auth_url|escapejs }}');
             container.appendChild(script);
         })();
     </script>

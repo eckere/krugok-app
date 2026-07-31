@@ -5,8 +5,9 @@
 <div class="app-content">
     <header class="page-header">
         <div>
-            <h1 class="page-header__title">Главная</h1>
-            <p class="page-header__subtitle">Обзор задач и проектов команды</p>
+            <div class="page-header__eyebrow">Командный ритм</div>
+            <h1 class="page-header__title">Рады видеть, {{ user.first_name|default:user.username }}.</h1>
+            <p class="page-header__subtitle">Проекты, сроки и разговоры команды — в одном спокойном рабочем пространстве.</p>
         </div>
         <div class="page-header__actions">
             <button type="button" class="btn btn-primary"
@@ -18,6 +19,19 @@
 
     <div id="task-modal"></div>
     <div id="project-modal"></div>
+
+    <section class="dashboard-score" aria-label="Текущий рабочий ритм">
+        <div class="dashboard-score__metric">
+            <span class="dashboard-score__label">Сейчас в работе</span>
+            <div class="dashboard-score__value">{{ task_stats.active }}</div>
+            <span class="dashboard-score__unit">активных задач</span>
+        </div>
+        <div class="dashboard-score__insight">
+            <span class="dashboard-score__eyebrow">Сегодня</span>
+            <p>Сфокусируйтесь на ближайших сроках. Завершено {{ task_stats.done }} из {{ task_stats.total }} задач.</p>
+            <a href="{% url 'task_list' %}?filter=mine" class="dashboard-score__arrow" aria-label="Открыть мои задачи">→</a>
+        </div>
+    </section>
 
     <section class="stats-grid" aria-label="Сводка">
         <article class="stat-card">

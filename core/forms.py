@@ -110,7 +110,15 @@ class TaskForm(forms.ModelForm):
         required=False,
         label='Дедлайн',
         widget=forms.DateTimeInput(
-            attrs={'type': 'datetime-local', 'class': FORM_CONTROL_CLASS}
+            format='%Y-%m-%dT%H:%M',
+            attrs={
+                'type': 'text',
+                'class': FORM_CONTROL_CLASS,
+                'data-custom-date': 'datetime',
+                'autocomplete': 'off',
+                'inputmode': 'none',
+                'readonly': 'readonly',
+            },
         ),
     )
 
@@ -282,7 +290,17 @@ class StageForm(forms.ModelForm):
     deadline = forms.DateField(
         required=False,
         label='Дедлайн',
-        widget=forms.DateInput(attrs={'type': 'date', 'class': FORM_CONTROL_CLASS}),
+        widget=forms.DateInput(
+            format='%Y-%m-%d',
+            attrs={
+                'type': 'text',
+                'class': FORM_CONTROL_CLASS,
+                'data-custom-date': 'date',
+                'autocomplete': 'off',
+                'inputmode': 'none',
+                'readonly': 'readonly',
+            },
+        ),
     )
 
     class Meta:
@@ -324,7 +342,15 @@ class InviteCodeCreateForm(forms.ModelForm):
             'project': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
             'project_role': forms.Select(attrs=CUSTOM_SELECT_ATTRS),
             'expires_at': forms.DateTimeInput(
-                attrs={'type': 'datetime-local', 'class': FORM_CONTROL_CLASS}
+                format='%Y-%m-%dT%H:%M',
+                attrs={
+                    'type': 'text',
+                    'class': FORM_CONTROL_CLASS,
+                    'data-custom-date': 'datetime',
+                    'autocomplete': 'off',
+                    'inputmode': 'none',
+                    'readonly': 'readonly',
+                },
             ),
         }
 

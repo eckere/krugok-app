@@ -8,7 +8,7 @@
     <script nonce="{{ request.csp_nonce }}" src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Petrona:opsz,wght@8..144,400;8..144,500;8..144,600&display=swap" rel="stylesheet">
     <script nonce="{{ request.csp_nonce }}"
             src="https://unpkg.com/htmx.org@2.0.3/dist/htmx.min.js"
             integrity="sha384-0895/pl2MU10Hqc6jd4RvrthNlDiE9U1tWmX7WRESftEDRosgxNsQG/Ze9YMRzHq"
@@ -16,52 +16,42 @@
     <link rel="stylesheet" href="{% static 'core/app.css' %}">
     <script src="{% static 'core/app.js' %}" defer></script>
 </head>
-<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<body class="tempo-app" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     {% csrf_token %}
 
     {% with current=request.resolver_match.url_name %}
     {% if user_can_access %}
     <div class="app-shell">
-        <nav class="app-sidebar">
-            <a href="{% url 'index' %}" class="app-brand">
-                <div class="app-brand__name">КружокAPP</div>
-                <div class="app-brand__caption">Командная панель</div>
-            </a>
+        <div class="app-ambient" aria-hidden="true">
+            <span class="app-ambient__glow app-ambient__glow--peach"></span>
+            <span class="app-ambient__glow app-ambient__glow--blue"></span>
+            <svg class="app-ambient__lines" viewBox="0 0 1440 920" preserveAspectRatio="none">
+                <path d="M-60 248C173 124 318 350 536 231S881 71 1054 210s217 181 461-26"/>
+                <path d="M-41 646c181-116 337-28 498-97s332-180 515-63 306 119 539-31"/>
+                <path d="M-70 760c205-178 392 34 581-75s325-54 495 34 292 48 501-80"/>
+            </svg>
+        </div>
 
-            <div class="app-nav">
-                <a href="{% url 'index' %}" class="app-nav__link {% if current == 'index' %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                    <span>Главная</span>
-                </a>
-                <a href="{% url 'task_list' %}" class="app-nav__link {% if 'task' in current %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 16h8"/></svg>
-                    <span>Задачи</span>
-                </a>
-                <a href="{% url 'project_list' %}" class="app-nav__link {% if 'project' in current or 'stage' in current or 'membership' in current %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/></svg>
-                    <span>Проекты</span>
-                </a>
-                <a href="{% url 'discussion_list' %}" class="app-nav__link {% if 'discussion' in current or 'message' in current %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a3 3 0 0 1-3 3H8l-5 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3z"/><path d="M8 8h8M8 12h5"/></svg>
-                    <span>Обсуждения</span>
-                </a>
-                {% if is_app_admin %}
-                <a href="{% url 'user_list' %}" class="app-nav__link {% if 'user_' in current or 'invite' in current %}is-active{% endif %}">
-                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                    <span>Пользователи</span>
-                </a>
-                {% endif %}
-            </div>
+        <header class="app-topbar">
+            <a href="{% url 'index' %}" class="app-brand" aria-label="КружокAPP — главная">
+                <svg class="app-brand__mark" viewBox="0 0 64 34" aria-hidden="true">
+                    <path d="M32 23.5c-6.4 8.9-15.1 9.8-21.4 5.1C4.8 24.3 4.3 15.3 9.5 9.8 15.8 3.2 24 6.5 32 17c8-10.5 16.2-13.8 22.5-7.2 5.2 5.5 4.7 14.5-1.1 18.8-6.3 4.7-15 3.8-21.4-5.1Z"/>
+                </svg>
+                <span class="app-brand__copy">
+                    <span class="app-brand__name">Кружок</span>
+                    <span class="app-brand__caption">командное пространство</span>
+                </span>
+            </a>
 
             <div class="app-user">
                 {% if dev_account_switcher_enabled %}
                 <details class="account-switcher">
                     <summary class="account-switcher__summary" title="Сменить тестовый аккаунт">
-                        <div class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</div>
-                        <div class="app-user__identity">
-                            <div class="app-user__name">{{ user.display_name }}</div>
-                            <div class="app-user__hint">Сменить аккаунт</div>
-                        </div>
+                        <span class="app-user__avatar">{{ user.first_name|default:user.username|first|upper }}</span>
+                        <span class="app-user__identity">
+                            <span class="app-user__name">{{ user.display_name }}</span>
+                            <span class="app-user__hint">Сменить аккаунт</span>
+                        </span>
                         <svg class="account-switcher__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
                             <path d="m6 8 4 4 4-4"/>
                         </svg>
@@ -97,6 +87,33 @@
                         {% endif %}
                         <span class="app-user__name">{{ user.display_name }}</span>
                     </a>
+                {% endif %}
+            </div>
+        </header>
+
+        <nav class="app-dock" aria-label="Основная навигация">
+            <div class="app-nav">
+                <a href="{% url 'index' %}" class="app-nav__link {% if current == 'index' %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1Z"/></svg>
+                    <span>Главная</span>
+                </a>
+                <a href="{% url 'task_list' %}" class="app-nav__link {% if 'task' in current %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4h14v16H5z"/><path d="m8 10 2 2 5-5M9 16h6"/></svg>
+                    <span>Задачи</span>
+                </a>
+                <a href="{% url 'project_list' %}" class="app-nav__link {% if 'project' in current or 'stage' in current or 'membership' in current %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3.5 7.5h17v11h-17z"/><path d="M7 7.5V5h4l2 2.5"/></svg>
+                    <span>Проекты</span>
+                </a>
+                <a href="{% url 'discussion_list' %}" class="app-nav__link {% if 'discussion' in current or 'message' in current %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15.5a2.5 2.5 0 0 1-2.5 2.5H9l-5 3v-14A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5Z"/><path d="M8 9h8M8 13h5"/></svg>
+                    <span>Чаты</span>
+                </a>
+                {% if is_app_admin %}
+                <a href="{% url 'user_list' %}" class="app-nav__link {% if 'user_' in current or 'invite' in current %}is-active{% endif %}">
+                    <svg class="app-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0M16 7.5a3 3 0 0 1 1 5.8M18 16a4.8 4.8 0 0 1 3 4"/></svg>
+                    <span>Пользователи</span>
+                </a>
                 {% endif %}
             </div>
         </nav>
@@ -184,10 +201,13 @@
         document.body.addEventListener('htmx:afterSwap', function (event) {
             var dialog = event.detail.target.querySelector('[role="dialog"]');
             if (dialog) {
-                var autofocus = dialog.querySelector(
-                    'input:not([type="hidden"]), select, textarea, button'
-                );
-                if (autofocus) autofocus.focus();
+                window.requestAnimationFrame(function () {
+                    var autofocus = dialog.querySelector(
+                        'input:not([type="hidden"]):not([aria-hidden="true"]), textarea, ' +
+                        '.custom-select__trigger, .custom-date__trigger, button'
+                    );
+                    if (autofocus) autofocus.focus();
+                });
             }
         });
 

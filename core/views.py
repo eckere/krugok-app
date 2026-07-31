@@ -324,20 +324,30 @@ def index(request):
         discussions = Discussion.objects.filter(
             models.Q(created_by=request.user) | models.Q(participants=request.user)
         ).distinct()
+        task_stats = tasks.aggregate(
+            total=models.Count('pk'),
+            active=models.Count(
+                'pk',
+                filter=~models.Q(status=Task.Status.DONE),
+            ),
+            done=models.Count(
+                'pk',
+                filter=models.Q(status=Task.Status.DONE),
+            ),
+            overdue=models.Count(
+                'pk',
+                filter=(
+                    ~models.Q(status=Task.Status.DONE)
+                    & models.Q(deadline__lt=timezone.now())
+                ),
+            ),
+        )
         context.update(
             {
                 'tasks': tasks,
                 'filter': 'all',
                 'projects': projects,
-                'task_stats': {
-                    'total': tasks.count(),
-                    'active': tasks.exclude(status=Task.Status.DONE).count(),
-                    'done': tasks.filter(status=Task.Status.DONE).count(),
-                    'overdue': tasks.exclude(status=Task.Status.DONE).filter(
-                        deadline__lt=timezone.now()
-                    ).count(),
-                },
-                'project_count': projects.count(),
+                'task_stats': task_stats,
                 'discussion_count': discussions.count(),
             }
         )

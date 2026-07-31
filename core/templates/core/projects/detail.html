@@ -7,12 +7,9 @@
 <div class="app-content">
   <header class="page-header">
     <div>
-      <div class="page-header__eyebrow">Проект</div>
       <h1 class="page-header__title">{{ project.name }}</h1>
       {% if project.description %}
         <p class="page-header__subtitle">{{ project.description }}</p>
-      {% else %}
-        <p class="page-header__subtitle">Этапы, задачи и команда проекта</p>
       {% endif %}
     </div>
     <div class="page-header__actions">
@@ -42,7 +39,6 @@
         <div class="panel__header">
           <div>
             <h2 class="panel__title">Этапы проекта</h2>
-            <div class="panel__subtitle">Задачи сгруппированы по рабочим ступеням</div>
           </div>
         </div>
         <div class="panel__body">

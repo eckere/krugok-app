@@ -4,7 +4,6 @@
 <div class="app-content">
   <header class="page-header">
     <div>
-      <div class="page-header__eyebrow">{% if task.project %}{{ task.project.name }}{% else %}Задача без проекта{% endif %}</div>
       <h1 class="page-header__title">{{ task.title }}</h1>
       <p class="page-header__subtitle">Создана {{ task.created_at|date:'d.m.Y, H:i' }}</p>
     </div>
@@ -55,7 +54,6 @@
         <div class="panel__header">
           <div>
             <h2 class="panel__title">Комментарии</h2>
-            <div class="panel__subtitle">История обсуждения задачи</div>
           </div>
         </div>
         <div id="comment-list" class="comment-list">

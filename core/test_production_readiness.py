@@ -500,6 +500,17 @@ class OperationalStatusTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_queue_profile_link_opens_current_profile(self):
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse('outbound_queue'))
+
+        self.assertContains(
+            response,
+            f'href="{reverse("profile_detail", args=[self.admin.pk])}"',
+        )
+        self.assertNotContains(response, f'href="{reverse("profile_settings")}"')
+
 
 @override_settings(TELEGRAM_ADMIN_IDS=frozenset({777, 888}))
 class AdminUserManagementTests(TestCase):
@@ -793,6 +804,17 @@ class ThemeAndListUxTests(TestCase):
         self.assertEqual(self.user.theme_preference, 'dark')
         self.assertContains(response, 'data-theme="dark"')
         self.assertContains(response, 'theme-picker')
+
+    def test_shell_is_compact_and_does_not_block_on_remote_fonts(self):
+        response = self.client.get(reverse('index'))
+
+        self.assertNotContains(response, 'fonts.googleapis.com')
+        self.assertNotContains(response, 'app-brand__mark')
+        self.assertNotContains(response, 'app-brand__caption')
+        self.assertNotContains(response, 'Командный ритм')
+        self.assertNotContains(response, 'dashboard-score')
+        self.assertContains(response, 'telegram-web-app.js" defer')
+        self.assertContains(response, 'crossorigin="anonymous" defer')
 
     def test_task_quick_filter_and_compact_search(self):
         overdue = Task.objects.create(

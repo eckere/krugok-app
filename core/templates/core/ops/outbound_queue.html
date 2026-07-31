@@ -6,14 +6,13 @@
 <div class="app-content">
   <header class="page-header">
     <div>
-      <div class="page-header__eyebrow">Система</div>
       <h1 class="page-header__title">Очередь Telegram-уведомлений</h1>
       <p class="page-header__subtitle">Релиз: <code>{{ release_sha }}</code></p>
     </div>
     <div class="page-header__actions">
       <a href="{% url 'user_list' %}" class="btn btn-secondary">Пользователи</a>
       <a href="{% url 'operational_status' %}" class="btn btn-secondary">JSON-статус</a>
-      <a href="{% url 'profile_settings' %}" class="btn btn-secondary">В профиль</a>
+      <a href="{% url 'profile_detail' request.user.pk %}" class="btn btn-secondary">В профиль</a>
     </div>
   </header>
 
@@ -36,7 +35,6 @@
     <div class="panel__header">
       <div>
         <h2 class="panel__title">Исчерпали попытки</h2>
-        <div class="panel__subtitle">Можно повторить с нуля или закрыть, если доставка больше не нужна.</div>
       </div>
     </div>
     <div class="panel__body">
@@ -72,8 +70,7 @@
   <section class="panel">
     <div class="panel__header">
       <div>
-        <h2 class="panel__title">Ожидают автоматического повтора</h2>
-        <div class="panel__subtitle">Последние сообщения, для которых worker ещё продолжает попытки.</div>
+        <h2 class="panel__title">Ожидают повтора</h2>
       </div>
     </div>
     <div class="panel__body">

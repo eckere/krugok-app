@@ -7,7 +7,6 @@
   <header class="page-header">
     <div>
       <h1 class="page-header__title">Обсуждения</h1>
-      <p class="page-header__subtitle">Переписка по задачам и отдельным темам</p>
     </div>
     <div class="page-header__actions">
       <a href="{% url 'discussion_create' %}" class="btn btn-primary">+ Новое обсуждение</a>
@@ -18,9 +17,6 @@
     <div class="panel__header">
       <div>
         <h2 class="panel__title">{% if is_app_admin %}Все чаты{% else %}Ваши чаты{% endif %}</h2>
-        <div class="panel__subtitle">
-          {% if is_app_admin %}Обсуждения всех участников приложения{% else %}Обсуждения, в которых вы участвуете{% endif %}
-        </div>
       </div>
       <span class="chip">{{ discussions|length }}</span>
     </div>

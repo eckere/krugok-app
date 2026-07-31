@@ -831,24 +831,9 @@
   document.body.addEventListener('htmx:afterSwap', function (event) {
     enhance(event.detail.target);
   });
-  document.body.addEventListener('htmx:afterSettle', function (event) {
-    enhance(event.detail.target);
-    window.requestAnimationFrame(function () {
-      enhance(event.detail.target);
-    });
-  });
 
   var selectObserver = new MutationObserver(function (mutations) {
     mutations.forEach(function (mutation) {
-      if (
-        mutation.type === 'attributes' &&
-        mutation.target.matches('select[data-custom-select="true"]') &&
-        mutation.target.dataset.customSelectEnhanced === 'true' &&
-        !mutation.target.classList.contains('custom-select__native')
-      ) {
-        concealNativeSelect(mutation.target);
-      }
-
       mutation.addedNodes.forEach(function (node) {
         if (node.nodeType === Node.ELEMENT_NODE) enhance(node);
       });
@@ -879,8 +864,6 @@
   enhance(document);
   selectObserver.observe(document.body, {
     childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['class']
+    subtree: true
   });
 })();

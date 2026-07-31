@@ -19,11 +19,8 @@ class SecurityHeadersMiddleware:
                 "script-src 'self' "
                 f"'nonce-{nonce}' https://telegram.org https://unpkg.com"
             ),
-            (
-                "style-src 'self' 'unsafe-inline' "
-                "https://fonts.googleapis.com"
-            ),
-            "font-src 'self' https://fonts.gstatic.com data:",
+            "style-src 'self' 'unsafe-inline'",
+            "font-src 'self' data:",
             "img-src 'self' data: https:",
             "connect-src 'self'",
             (

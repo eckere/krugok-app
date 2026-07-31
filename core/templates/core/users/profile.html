@@ -6,7 +6,6 @@
 <div class="app-content">
   <header class="page-header">
     <div>
-      <div class="page-header__eyebrow">Профиль</div>
       <h1 class="page-header__title">{{ profile_user.display_name }}</h1>
       {% if profile_user.public_username %}
         <p class="page-header__subtitle">@{{ profile_user.public_username }}</p>
@@ -42,7 +41,6 @@
       <div class="panel__header">
         <div>
           <h2 class="panel__title">Настройки</h2>
-          <div class="panel__subtitle">Оформление, часовой пояс и уведомления</div>
         </div>
       </div>
       <div class="panel__body">
